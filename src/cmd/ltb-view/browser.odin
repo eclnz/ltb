@@ -5,6 +5,7 @@ import "core:slice"
 import "core:strings"
 import "ltb:app"
 import "ltb:layers"
+import "ltb:ui"
 import rl "vendor:raylib"
 
 /*
@@ -16,8 +17,6 @@ ingests it into the world already up, which needs a target layer, so the
 catalogue is offered alongside the file list whenever the selection is not a
 manifest.
 */
-
-ROW_H :: 19
 
 Browser :: struct {
 	open:        bool,
@@ -230,31 +229,31 @@ browser_input :: proc(m: ^Menu, a: ^app.App) {
 	}
 
 	if wheel := rl.GetMouseWheelMove(); wheel != 0 {
-		if rl.CheckCollisionPointRec(mp, b.layer_list) && !b.sel_manifest {
-			b.layer_scroll = clamp(b.layer_scroll - int(wheel) * 3, 0, max(0, len(b.layer_names) - browser_rows(b.layer_list)))
+		if ui.hovered(b.layer_list, mp) && !b.sel_manifest {
+			b.layer_scroll = clamp(b.layer_scroll - int(wheel) * 3, 0, max(0, len(b.layer_names) - ui.list_rows(b.layer_list)))
 		} else {
-			b.scroll = clamp(b.scroll - int(wheel) * 3, 0, max(0, len(b.paths) - browser_rows(b.list)))
+			b.scroll = clamp(b.scroll - int(wheel) * 3, 0, max(0, len(b.paths) - ui.list_rows(b.list)))
 		}
 	}
 
 	if !clicked {
 		return
 	}
-	if rl.CheckCollisionPointRec(mp, b.up_btn) {
+	if ui.hovered(b.up_btn, mp) {
 		browser_up(b, a)
 		return
 	}
-	if rl.CheckCollisionPointRec(mp, b.cancel_btn) {
+	if ui.hovered(b.cancel_btn, mp) {
 		browser_close(b)
 		return
 	}
-	if rl.CheckCollisionPointRec(mp, b.open_btn) {
+	if ui.hovered(b.open_btn, mp) {
 		browser_activate(m, a)
 		return
 	}
-	if rl.CheckCollisionPointRec(mp, b.list) {
-		row := b.scroll + int((mp.y - b.list.y) / ROW_H)
-		if row >= 0 && row < len(b.paths) {
+	if ui.hovered(b.list, mp) {
+		row := ui.list_row_at(b.list, mp, b.scroll, len(b.paths))
+		if row >= 0 {
 			// A second click on the row already selected opens it, which is
 			// the double-click every file dialog answers to.
 			if row == b.selected {
@@ -265,15 +264,15 @@ browser_input :: proc(m: ^Menu, a: ^app.App) {
 		}
 		return
 	}
-	if !b.sel_manifest && rl.CheckCollisionPointRec(mp, b.layer_list) {
-		row := b.layer_scroll + int((mp.y - b.layer_list.y) / ROW_H)
-		if row >= 0 && row < len(b.layer_names) {
+	if !b.sel_manifest && ui.hovered(b.layer_list, mp) {
+		row := ui.list_row_at(b.layer_list, mp, b.layer_scroll, len(b.layer_names))
+		if row >= 0 {
 			b.layer_index = row
 		}
 		return
 	}
 	// Clicking outside the panel dismisses it, like the drop-down menu.
-	if !rl.CheckCollisionPointRec(mp, b.panel) {
+	if !ui.hovered(b.panel, mp) {
 		browser_close(b)
 	}
 }
@@ -316,18 +315,13 @@ browser_activate :: proc(m: ^Menu, a: ^app.App) {
 // Keeps the selected row on screen after a keyboard move.
 @(private = "file")
 browser_reveal :: proc(b: ^Browser) {
-	rows := browser_rows(b.list)
+	rows := ui.list_rows(b.list)
 	if b.selected < b.scroll {
 		b.scroll = b.selected
 	} else if b.selected >= b.scroll + rows {
 		b.scroll = b.selected - rows + 1
 	}
 	b.scroll = clamp(b.scroll, 0, max(0, len(b.paths) - rows))
-}
-
-@(private = "file")
-browser_rows :: proc(r: rl.Rectangle) -> int {
-	return max(1, int(r.height / ROW_H))
 }
 
 // ---------------------------------------------------------------------------
@@ -360,110 +354,57 @@ browser_layout :: proc(b: ^Browser) {
 browser_draw :: proc(m: ^Menu, a: ^app.App) {
 	b := &m.browser
 	browser_layout(b)
-	mp := rl.GetMousePosition()
+	mp := ui.mouse()
 
-	// Dim the map, so the modal reads as modal.
-	rl.DrawRectangle(0, 0, rl.GetScreenWidth(), rl.GetScreenHeight(), rl.Color{0, 0, 0, 140})
-	rl.DrawRectangleRec(b.panel, rl.Color{28, 31, 38, 252})
-	rl.DrawRectangleLinesEx(b.panel, 1, rl.Color{70, 76, 90, 255})
+	ui.scrim()
+	ui.frame(b.panel)
 
 	px := i32(b.panel.x)
 	py := i32(b.panel.y)
-	rl.DrawText("Open data", px + 12, py + 10, 18, rl.RAYWHITE)
-	rl.DrawText(fmt.ctprintf("%s", b.dir), px + 12, py + 42, 12, rl.Color{150, 160, 180, 255})
-	draw_button(b.up_btn, "Up", rl.CheckCollisionPointRec(mp, b.up_btn), true)
+	bottom := i32(b.panel.y + b.panel.height)
+	ui.text("Open data", px + 12, py + 10, ui.HEADING, ui.TEXT)
+	ui.text(b.dir, px + 12, py + 42, ui.SMALL, ui.TEXT_MUTED)
+	ui.button(b.up_btn, "Up", ui.hovered(b.up_btn, mp), true)
 
-	draw_row_list(b.list, b.names[:], b.selected, b.scroll, b.is_dir[:], mp)
+	ui.list(b.list, len(b.names), b.selected, b.scroll, mp, file_label, b)
 
 	if !b.sel_manifest {
-		rl.DrawText(
-			"ingest into layer",
-			i32(b.layer_list.x),
-			i32(b.layer_list.y) - 16,
-			12,
-			rl.Color{150, 160, 180, 255},
-		)
-		draw_row_list(b.layer_list, b.layer_names[:], b.layer_index, b.layer_scroll, nil, mp)
+		ui.text("ingest into layer", i32(b.layer_list.x), i32(b.layer_list.y) - 16, ui.SMALL, ui.TEXT_MUTED)
+		ui.list(b.layer_list, len(b.layer_names), b.layer_index, b.layer_scroll, mp, layer_label, b)
 	} else if b.selected >= 0 {
-		rl.DrawText(
-			"manifest: replaces the world",
-			px + 12,
-			i32(b.panel.y + b.panel.height) - 62,
-			12,
-			rl.Color{140, 200, 150, 255},
-		)
+		ui.text("manifest: replaces the world", px + 12, bottom - 62, ui.SMALL, ui.OK)
 	}
 
 	can_open := b.selected >= 0 && b.selected < len(b.paths)
-	label: cstring = can_open && b.is_dir[b.selected] ? "Enter" : "Open"
-	draw_button(b.cancel_btn, "Cancel", rl.CheckCollisionPointRec(mp, b.cancel_btn), true)
-	draw_button(b.open_btn, label, rl.CheckCollisionPointRec(mp, b.open_btn), can_open)
+	ui.button(b.cancel_btn, "Cancel", ui.hovered(b.cancel_btn, mp), true)
+	ui.button(
+		b.open_btn,
+		can_open && b.is_dir[b.selected] ? "Enter" : "Open",
+		ui.hovered(b.open_btn, mp),
+		can_open,
+	)
 
-	rl.DrawText(
+	ui.text(
 		"double-click or enter opens   backspace goes up   esc cancels",
 		px + 12,
-		i32(b.panel.y + b.panel.height) - 30,
-		11,
-		rl.Color{130, 138, 152, 255},
+		bottom - 30,
+		ui.TINY,
+		ui.TEXT_FAINT,
 	)
 }
 
+// A directory reads as somewhere to go rather than something to open, so it is
+// marked as such in both its colour and its trailing slash.
 @(private = "file")
-draw_row_list :: proc(r: rl.Rectangle, names: []string, selected, scroll: int, is_dir: []bool, mp: rl.Vector2) {
-	rl.DrawRectangleRec(r, rl.Color{18, 20, 25, 255})
-	rl.DrawRectangleLinesEx(r, 1, rl.Color{60, 66, 78, 255})
-
-	rows := browser_rows(r)
-	rl.BeginScissorMode(i32(r.x), i32(r.y), i32(r.width), i32(r.height))
-	defer rl.EndScissorMode()
-
-	for i in scroll ..< min(scroll + rows, len(names)) {
-		row := rl.Rectangle{r.x, r.y + f32(i - scroll) * ROW_H, r.width, ROW_H}
-		if i == selected {
-			rl.DrawRectangleRec(row, rl.Color{58, 92, 148, 255})
-		} else if rl.CheckCollisionPointRec(mp, row) {
-			rl.DrawRectangleRec(row, rl.Color{44, 49, 60, 255})
-		}
-		dir := len(is_dir) > i && is_dir[i]
-		color := dir ? rl.Color{150, 190, 235, 255} : rl.RAYWHITE
-		if i == selected {
-			color = rl.RAYWHITE
-		}
-		text := dir \
-			? fmt.ctprintf("%s/", names[i]) \
-			: strings.clone_to_cstring(names[i], context.temp_allocator)
-		rl.DrawText(text, i32(row.x) + 8, i32(row.y) + 3, 13, color)
+file_label :: proc(index: int, user: rawptr) -> (text: string, color: ui.Color) {
+	b := (^Browser)(user)
+	if b.is_dir[index] {
+		return fmt.tprintf("%s/", b.names[index]), ui.LINK
 	}
-
-	// A scrollbar, drawn only when there is more than one screenful.
-	if len(names) > rows {
-		track_h := r.height
-		thumb_h := max(f32(20), track_h * f32(rows) / f32(len(names)))
-		t := f32(scroll) / f32(max(1, len(names) - rows))
-		rl.DrawRectangle(
-			i32(r.x + r.width) - 5,
-			i32(r.y + t * (track_h - thumb_h)),
-			4,
-			i32(thumb_h),
-			rl.Color{90, 98, 115, 255},
-		)
-	}
+	return b.names[index], ui.TEXT
 }
 
 @(private = "file")
-draw_button :: proc(r: rl.Rectangle, label: cstring, hovered, enabled: bool) {
-	bg := rl.Color{48, 53, 64, 255}
-	if enabled && hovered {
-		bg = rl.Color{58, 92, 148, 255}
-	}
-	rl.DrawRectangleRec(r, bg)
-	rl.DrawRectangleLinesEx(r, 1, rl.Color{80, 88, 104, 255})
-	tw := rl.MeasureText(label, 13)
-	rl.DrawText(
-		label,
-		i32(r.x + r.width * 0.5) - tw / 2,
-		i32(r.y + r.height * 0.5) - 6,
-		13,
-		enabled ? rl.RAYWHITE : rl.Color{120, 126, 138, 255},
-	)
+layer_label :: proc(index: int, user: rawptr) -> (text: string, color: ui.Color) {
+	return (^Browser)(user).layer_names[index], ui.TEXT
 }

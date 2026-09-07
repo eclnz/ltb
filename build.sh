@@ -21,7 +21,7 @@ mkdir -p "$OUT"
 
 # Every package, leaves first, so a failure surfaces at the lowest layer that
 # caused it rather than in whatever imported it.
-PACKAGES="hex geo ecs layers world ingest/tiff ingest/vector ingest sim render app"
+PACKAGES="hex geo ecs layers world ingest/tiff ingest/vector ingest sim ui render app"
 
 mode=${1:-release}
 case "$mode" in

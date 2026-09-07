@@ -1,9 +1,9 @@
 package main
 
-import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "ltb:app"
+import "ltb:ui"
 import rl "vendor:raylib"
 
 /*
@@ -182,7 +182,7 @@ menu_input :: proc(m: ^Menu, a: ^app.App) -> (consumed: bool) {
 		return true
 	}
 
-	if clicked && rl.CheckCollisionPointRec(mp, m.file_rect) {
+	if clicked && ui.hovered(m.file_rect, mp) {
 		m.open_menu = m.open_menu == 0 ? -1 : 0
 		return true
 	}
@@ -192,7 +192,7 @@ menu_input :: proc(m: ^Menu, a: ^app.App) -> (consumed: bool) {
 			if item.kind == .Separator {
 				continue
 			}
-			if !rl.CheckCollisionPointRec(mp, item.rect) {
+			if !ui.hovered(item.rect, mp) {
 				continue
 			}
 			if !clicked {
@@ -244,21 +244,12 @@ menu_input :: proc(m: ^Menu, a: ^app.App) -> (consumed: bool) {
 // Drawing
 // ---------------------------------------------------------------------------
 
-@(private = "file")
-BAR_BG :: rl.Color{22, 24, 30, 240}
-@(private = "file")
-PANEL_BG :: rl.Color{28, 31, 38, 250}
-@(private = "file")
-HIGHLIGHT :: rl.Color{58, 92, 148, 255}
-@(private = "file")
-BORDER :: rl.Color{70, 76, 90, 255}
-
 // Positions the bar and, when it is down, the File menu's items. Layout runs
 // during input as well as drawing, so hit tests and pixels never disagree.
 @(private = "file")
 menu_layout :: proc(m: ^Menu) {
 	clear(&m.items)
-	label_w := f32(rl.MeasureText("File", 14))
+	label_w := f32(ui.text_width("File", ui.BODY))
 	m.file_rect = rl.Rectangle{6, 0, label_w + 20, MENU_BAR_H}
 	if m.open_menu != 0 {
 		return
@@ -283,8 +274,7 @@ menu_layout :: proc(m: ^Menu) {
 		if item.kind == .Separator {
 			continue
 		}
-		w := f32(rl.MeasureText(strings.clone_to_cstring(item.label, context.temp_allocator), 14)) + 34
-		width = max(width, w)
+		width = max(width, f32(ui.text_width(item.label, ui.BODY) + 34))
 	}
 
 	y := f32(MENU_BAR_H)
@@ -301,51 +291,46 @@ menu_draw :: proc(m: ^Menu, a: ^app.App) {
 		return
 	}
 	menu_layout(m)
-	screen_w := rl.GetScreenWidth()
-	mp := rl.GetMousePosition()
+	screen_w := ui.screen_width()
+	mp := ui.mouse()
 
-	rl.DrawRectangle(0, 0, screen_w, MENU_BAR_H, BAR_BG)
-	rl.DrawLine(0, MENU_BAR_H, screen_w, MENU_BAR_H, BORDER)
+	ui.fill(ui.rect(0, 0, screen_w, MENU_BAR_H), ui.BAR)
+	ui.fill(ui.rect(0, MENU_BAR_H, screen_w, 1), ui.BORDER)
 
-	if m.open_menu == 0 || rl.CheckCollisionPointRec(mp, m.file_rect) {
-		rl.DrawRectangleRec(m.file_rect, HIGHLIGHT)
+	if m.open_menu == 0 || ui.hovered(m.file_rect, mp) {
+		ui.fill(m.file_rect, ui.HIGHLIGHT)
 	}
-	rl.DrawText("File", i32(m.file_rect.x) + 10, 6, 14, rl.RAYWHITE)
+	ui.text("File", i32(m.file_rect.x) + 10, 6, ui.BODY, ui.TEXT)
 
 	// The dataset in view, right-aligned, so the window always says what it is
 	// showing without opening anything.
-	name := fmt.ctprintf("%s", m.current)
-	rl.DrawText(name, screen_w - rl.MeasureText(name, 13) - 10, 7, 13, rl.Color{170, 180, 200, 255})
+	ui.text_right(m.current, screen_w - 10, 7, ui.LABEL, ui.TEXT_MUTED)
 
 	if len(m.status) > 0 {
-		text := fmt.ctprintf("%s", m.status)
-		rl.DrawText(text, screen_w / 2 - rl.MeasureText(text, 13) / 2, 7, 13, rl.Color{220, 190, 140, 255})
+		ui.text_centered(m.status, screen_w / 2, 7, ui.LABEL, ui.WARN)
 	}
 
 	if m.open_menu != 0 || len(m.items) == 0 {
 		return
 	}
 	last := m.items[len(m.items) - 1].rect
-	panel := rl.Rectangle{m.file_rect.x, MENU_BAR_H, last.width, last.y + last.height - MENU_BAR_H}
-	rl.DrawRectangleRec(panel, PANEL_BG)
-	rl.DrawRectangleLinesEx(panel, 1, BORDER)
+	ui.frame(ui.Rectangle{m.file_rect.x, MENU_BAR_H, last.width, last.y + last.height - MENU_BAR_H})
 
 	for item in m.items {
 		if item.kind == .Separator {
 			y := i32(item.rect.y + item.rect.height * 0.5)
-			rl.DrawLine(i32(item.rect.x) + 6, y, i32(item.rect.x + item.rect.width) - 6, y, BORDER)
+			ui.fill(ui.rect(i32(item.rect.x) + 6, y, i32(item.rect.width) - 12, 1), ui.BORDER)
 			continue
 		}
-		if rl.CheckCollisionPointRec(mp, item.rect) {
-			rl.DrawRectangleRec(item.rect, HIGHLIGHT)
+		if ui.hovered(item.rect, mp) {
+			ui.fill(item.rect, ui.HIGHLIGHT)
 		}
-		color := item.kind == .Quit ? rl.Color{220, 170, 170, 255} : rl.RAYWHITE
-		rl.DrawText(
-			strings.clone_to_cstring(item.label, context.temp_allocator),
+		ui.text(
+			item.label,
 			i32(item.rect.x) + 12,
 			i32(item.rect.y) + 5,
-			14,
-			color,
+			ui.BODY,
+			item.kind == .Quit ? ui.ALERT : ui.TEXT,
 		)
 	}
 }

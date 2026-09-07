@@ -7,6 +7,7 @@ import "ltb:app"
 import hex "ltb:hex"
 import "ltb:layers"
 import "ltb:render"
+import "ltb:ui"
 import "ltb:world"
 import rl "vendor:raylib"
 
@@ -77,11 +78,11 @@ run_capture :: proc(a: ^app.App, dir: string, shots: []Shot) {
 			centre := [2]f64{cam.screen.x * 0.5, cam.screen.y * 0.42}
 			hovered = render.camera_pick(&cam, &a.world, centre, stats.level)
 			if shot.inspector {
-				render.draw_cell_outline(&a.world, &cam, stats.level, hovered, rl.Color{255, 255, 255, 210}, 2)
+				render.draw_cell_outline(&a.world, &cam, stats.level, hovered, ui.CURSOR, 2)
 			}
 			draw_hud(a, &cam, view, stats, hovered, false, shot.inspector)
 			if len(shot.caption) > 0 {
-				draw_caption(shot.caption, i32(a.opts.width), i32(a.opts.height))
+				draw_caption(shot.caption)
 			}
 			rl.EndDrawing()
 		}
@@ -98,13 +99,4 @@ run_capture :: proc(a: ^app.App, dir: string, shots: []Shot) {
 		)
 		free_all(context.temp_allocator)
 	}
-}
-
-@(private)
-draw_caption :: proc(text: string, w, h: i32) {
-	c := strings.clone_to_cstring(text, context.temp_allocator)
-	tw := rl.MeasureText(c, 18)
-	x := (w - tw) / 2
-	rl.DrawRectangle(x - 14, h - 96, tw + 28, 32, rl.Color{0, 0, 0, 170})
-	rl.DrawText(c, x, h - 88, 18, rl.RAYWHITE)
 }

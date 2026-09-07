@@ -7,6 +7,7 @@ import hex "ltb:hex"
 import "ltb:layers"
 import "ltb:render"
 import "ltb:sim"
+import "ltb:ui"
 import "ltb:world"
 import rl "vendor:raylib"
 
@@ -190,7 +191,7 @@ run_interactive :: proc(a: ^app.App) {
 
 		// ---- draw ----
 		rl.BeginDrawing()
-		rl.ClearBackground(render.BACKGROUND)
+		rl.ClearBackground(ui.BACKGROUND)
 
 		if has_data {
 			stats := render.draw_layer(&rend, &a.world, &cam, view)
@@ -199,7 +200,7 @@ run_interactive :: proc(a: ^app.App) {
 			if !menu_owns_input {
 				mp := rl.GetMousePosition()
 				hovered = render.camera_pick(&cam, &a.world, {f64(mp.x), f64(mp.y)}, stats.level)
-				render.draw_cell_outline(&a.world, &cam, stats.level, hovered, rl.Color{255, 255, 255, 190}, 2)
+				render.draw_cell_outline(&a.world, &cam, stats.level, hovered, ui.CURSOR, 2)
 			}
 			draw_hud(a, &cam, view, stats, hovered, running, show_inspector)
 		} else {
@@ -241,97 +242,4 @@ opening_layer :: proc(a: ^app.App, available: []layers.Layer_Id) -> (index: int,
 		}
 	}
 	return 0, fmt.tprintf("layer %q holds no data in this dataset", want)
-}
-
-// Why there is no map, in the middle of the window where the map would be.
-// The alternative -- drawing some other layer so the window looks busy -- is
-// what this viewer does not do.
-@(private)
-draw_no_map :: proc(reason: string) {
-	centred :: proc(text: cstring, y: i32, size: i32, color: rl.Color) {
-		rl.DrawText(text, rl.GetScreenWidth() / 2 - rl.MeasureText(text, size) / 2, y, size, color)
-	}
-	y := rl.GetScreenHeight() / 2 - 30
-	centred(fmt.ctprintf("%s", reason), y, 22, rl.Color{235, 170, 160, 255})
-	centred(
-		"File > Open dataset, press o, or drop a GeoTIFF or GeoJSON on the window",
-		y + 34,
-		14,
-		rl.Color{160, 170, 190, 255},
-	)
-}
-
-@(private)
-draw_hud :: proc(
-	a: ^app.App,
-	cam: ^render.Camera,
-	view: render.View,
-	stats: render.Stats,
-	hovered: hex.Hex,
-	running: bool,
-	show_inspector: bool,
-) {
-	screen_w := rl.GetScreenWidth()
-	screen_h := rl.GetScreenHeight()
-	// Everything hangs below the menu bar rather than under it.
-	top := i32(MENU_BAR_H) + 1
-
-	// Left panel: what is being drawn.
-	rl.DrawRectangle(0, top, 320, 118, rl.Color{0, 0, 0, 150})
-	desc := layers.desc_of(a.world.registry, view.layer)
-	rl.DrawText(fmt.ctprintf("%s", desc.name), 10, top + 8, 20, rl.RAYWHITE)
-	rl.DrawText(fmt.ctprintf("%s", desc.description), 10, top + 30, 11, rl.GRAY)
-	rl.DrawText(
-		fmt.ctprintf(
-			"level %d%s  %.0f m/px  cell %.0f m",
-			stats.level,
-			view.force_level >= 0 ? " (locked)" : "",
-			cam.metres_per_pixel,
-			world.level_resolution(&a.world, stats.level),
-		),
-		10,
-		top + 52,
-		13,
-		rl.LIGHTGRAY,
-	)
-	rl.DrawText(
-		fmt.ctprintf("%d cells drawn, %d without data", stats.cells_drawn, stats.cells_missing),
-		10,
-		top + 70,
-		13,
-		rl.LIGHTGRAY,
-	)
-	rl.DrawText(
-		fmt.ctprintf(
-			"%s  year %d  day %.0f  %d fps",
-			running ? "running" : "paused",
-			sim.clock_year(a.sim.clock),
-			sim.clock_day_of_year(a.sim.clock),
-			rl.GetFPS(),
-		),
-		10,
-		top + 88,
-		13,
-		running ? rl.Color{140, 220, 150, 255} : rl.Color{220, 190, 140, 255},
-	)
-
-	// Legend, bottom left.
-	legend_h := i32(len(desc.categories) > 0 ? 30 + 17 * len(desc.categories) : 62)
-	rl.DrawRectangle(0, screen_h - legend_h - 46, 240, legend_h + 46, rl.Color{0, 0, 0, 150})
-	render.draw_legend(&a.world, view.layer, 10, screen_h - legend_h - 36, stats.range_lo, stats.range_hi)
-	render.draw_scale_bar(cam, 10, screen_h - 22)
-
-	// Inspector, right.
-	if show_inspector {
-		rl.DrawRectangle(screen_w - 300, top, 300, screen_h - top, rl.Color{0, 0, 0, 150})
-		render.draw_cell_inspector(&a.world, stats.level, hovered, screen_w - 288, top + 10, 30)
-	}
-
-	rl.DrawText(
-		"[ ] layer   g grid   h shade   f fill   r range   i inspector   , . level   ` auto   space run   n step   o open",
-		10,
-		screen_h - 40 - 0,
-		11,
-		rl.Color{200, 200, 200, 160},
-	)
 }
