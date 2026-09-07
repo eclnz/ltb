@@ -1,0 +1,276 @@
+{
+  "region": {
+    "title": "Rangataua Forest, Ruapehu -- old-growth podocarp, short-tailed bats",
+    "lat": -39.4,
+    "lon": 175.48,
+    "span_km": 10,
+    "cell_area": 10000,
+    "levels": 8,
+    "layer": "bat.habitat_suitability"
+  },
+  "about": "Old-growth podocarp and mountain beech on the southern slopes of Ruapehu, holding one of the largest central lesser short-tailed bat populations. Unbroken canopy and very large emergent stems: the short-tailed model should score this highest of the five, and the long-tailed model should not.",
+  "fetch": "tools/fetch-nz-data.sh rangataua",
+  "optional": [
+    "rangataua/lcdb.geojson needs LRIS_API_KEY; without it OpenStreetMap supplies canopy cover and the structural priors are not written",
+    "rangataua/aerial.tif needs LINZ_API_KEY",
+    "rangataua/tenure.geojson needs LINZ_API_KEY",
+    "a source that is missing is reported and skipped; the rest still load"
+  ],
+  "sources": [
+    {
+      "path": "rangataua/dem.tif",
+      "layer": "terrain.elevation",
+      "resample": "auto"
+    },
+    {
+      "path": "rangataua/aerial.tif",
+      "layer": "imagery.true_color",
+      "resample": "auto"
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "landuse",
+          "is": [
+            "forest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "wood",
+            "scrub"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "landuse",
+        "table": "nz_osm_tenure"
+      },
+      "filter": [
+        {
+          "key": "landuse"
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "human.road_class",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "highway",
+        "table": "osm_highway"
+      },
+      "width_m": {
+        "classify": "highway",
+        "table": "osm_highway_width"
+      },
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "human.road_density",
+      "measure": "density",
+      "value": {
+        "constant": 1
+      },
+      "unit_scale": 0.001,
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 12,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "river",
+            "canal"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 4,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "stream"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "water"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "rangataua/osm.geojson",
+      "layer": "human.built_up",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "building"
+        }
+      ]
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "nz.lcdb_class",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_code"
+      }
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "land.cover",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_landcover"
+      }
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "forest.density",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "forest.canopy_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy_height",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "forest.emergent_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_emergent_height"
+      }
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "forest.stand_age",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_stand_age"
+      }
+    },
+    {
+      "path": "rangataua/lcdb.geojson",
+      "layer": "forestry.crop_species",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_crop_species"
+      }
+    },
+    {
+      "path": "rangataua/tenure.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "constant": 1
+      }
+    },
+    {
+      "path": "rangataua/bats.geojson",
+      "layer": "bat.records",
+      "measure": "count"
+    },
+    {
+      "path": "rangataua/bats.geojson",
+      "layer": "bat.species_present",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "species",
+        "fallback": 0
+      }
+    },
+    {
+      "path": "rangataua/bats.geojson",
+      "layer": "bat.last_detected_year",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "year",
+        "fallback": 0
+      }
+    }
+  ],
+  "derive": [
+    "slope_aspect",
+    "hillshade",
+    "distance_to_water",
+    "bat_habitat"
+  ],
+  "build_pyramid": true
+}

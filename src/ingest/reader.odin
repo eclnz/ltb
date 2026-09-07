@@ -201,6 +201,14 @@ CLASS_TABLES := [?]Named_Class_Table {
 	{"ne_road_speed", NE_ROAD_SPEEDS[:]},
 	{"ne_road_width", NE_ROAD_WIDTHS[:]},
 	{"ne_water", NE_WATER_CLASSES[:]},
+	{"nz_lcdb_code", NZ_LCDB_CODES[:]},
+	{"nz_lcdb_landcover", NZ_LCDB_LANDCOVER[:]},
+	{"nz_lcdb_canopy", NZ_LCDB_CANOPY[:]},
+	{"nz_lcdb_canopy_height", NZ_LCDB_CANOPY_HEIGHT[:]},
+	{"nz_lcdb_emergent_height", NZ_LCDB_EMERGENT_HEIGHT[:]},
+	{"nz_lcdb_stand_age", NZ_LCDB_STAND_AGE[:]},
+	{"nz_lcdb_crop_species", NZ_LCDB_CROP_SPECIES[:]},
+	{"nz_osm_tenure", NZ_OSM_TENURE[:]},
 }
 
 class_table_for :: proc(name: string) -> (rules: []Class_Rule, ok: bool) {

@@ -290,6 +290,7 @@ register_standard_layers :: proc(r: ^Registry) {
 	register_fauna_layers(r)
 	register_human_layers(r)
 	register_simulation_layers(r)
+	register_nz_layers(r)
 }
 
 register_imagery_layers :: proc(r: ^Registry) {

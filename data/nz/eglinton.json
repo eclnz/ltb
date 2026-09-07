@@ -1,0 +1,276 @@
+{
+  "region": {
+    "title": "Eglinton Valley, Fiordland -- long-tailed and short-tailed bats in beech",
+    "lat": -44.98,
+    "lon": 168.02,
+    "span_km": 12,
+    "cell_area": 10000,
+    "levels": 8,
+    "layer": "bat.habitat_suitability"
+  },
+  "about": "Red and silver beech valley floor along the Milford road, with the Eglinton River running its length. The longest-running bat study in the country: both species are here, both roost in cavities in old beech, and the population history is a record of what stoat and rat irruptions after a beech mast do to a colony. Almost entirely public conservation land, so disturbance risk is low and predation is the whole story.",
+  "fetch": "tools/fetch-nz-data.sh eglinton",
+  "optional": [
+    "eglinton/lcdb.geojson needs LRIS_API_KEY; without it OpenStreetMap supplies canopy cover and the structural priors are not written",
+    "eglinton/aerial.tif needs LINZ_API_KEY",
+    "eglinton/tenure.geojson needs LINZ_API_KEY",
+    "a source that is missing is reported and skipped; the rest still load"
+  ],
+  "sources": [
+    {
+      "path": "eglinton/dem.tif",
+      "layer": "terrain.elevation",
+      "resample": "auto"
+    },
+    {
+      "path": "eglinton/aerial.tif",
+      "layer": "imagery.true_color",
+      "resample": "auto"
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "landuse",
+          "is": [
+            "forest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "wood",
+            "scrub"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "landuse",
+        "table": "nz_osm_tenure"
+      },
+      "filter": [
+        {
+          "key": "landuse"
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "human.road_class",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "highway",
+        "table": "osm_highway"
+      },
+      "width_m": {
+        "classify": "highway",
+        "table": "osm_highway_width"
+      },
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "human.road_density",
+      "measure": "density",
+      "value": {
+        "constant": 1
+      },
+      "unit_scale": 0.001,
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 12,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "river",
+            "canal"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 4,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "stream"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "water"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "eglinton/osm.geojson",
+      "layer": "human.built_up",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "building"
+        }
+      ]
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "nz.lcdb_class",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_code"
+      }
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "land.cover",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_landcover"
+      }
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "forest.density",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "forest.canopy_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy_height",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "forest.emergent_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_emergent_height"
+      }
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "forest.stand_age",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_stand_age"
+      }
+    },
+    {
+      "path": "eglinton/lcdb.geojson",
+      "layer": "forestry.crop_species",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_crop_species"
+      }
+    },
+    {
+      "path": "eglinton/tenure.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "constant": 1
+      }
+    },
+    {
+      "path": "eglinton/bats.geojson",
+      "layer": "bat.records",
+      "measure": "count"
+    },
+    {
+      "path": "eglinton/bats.geojson",
+      "layer": "bat.species_present",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "species",
+        "fallback": 0
+      }
+    },
+    {
+      "path": "eglinton/bats.geojson",
+      "layer": "bat.last_detected_year",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "year",
+        "fallback": 0
+      }
+    }
+  ],
+  "derive": [
+    "slope_aspect",
+    "hillshade",
+    "distance_to_water",
+    "bat_habitat"
+  ],
+  "build_pyramid": true
+}

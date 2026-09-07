@@ -1,0 +1,276 @@
+{
+  "region": {
+    "title": "Hanmer Forest -- long-tailed bats roosting in exotic plantation",
+    "lat": -42.523,
+    "lon": 172.828,
+    "span_km": 8,
+    "cell_area": 6000,
+    "levels": 8,
+    "layer": "bat.habitat_suitability"
+  },
+  "about": "Long-tailed bats roosting in a working exotic plantation against a backdrop of beech on the surrounding hills. This is the region where the forestry layers matter: the roosts are in stands that have a rotation age, and the harvest schedule decides whether they survive.",
+  "fetch": "tools/fetch-nz-data.sh hanmer",
+  "optional": [
+    "hanmer/lcdb.geojson needs LRIS_API_KEY; without it OpenStreetMap supplies canopy cover and the structural priors are not written",
+    "hanmer/aerial.tif needs LINZ_API_KEY",
+    "hanmer/tenure.geojson needs LINZ_API_KEY",
+    "a source that is missing is reported and skipped; the rest still load"
+  ],
+  "sources": [
+    {
+      "path": "hanmer/dem.tif",
+      "layer": "terrain.elevation",
+      "resample": "auto"
+    },
+    {
+      "path": "hanmer/aerial.tif",
+      "layer": "imagery.true_color",
+      "resample": "auto"
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "landuse",
+          "is": [
+            "forest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "wood",
+            "scrub"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "landuse",
+        "table": "nz_osm_tenure"
+      },
+      "filter": [
+        {
+          "key": "landuse"
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "human.road_class",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "highway",
+        "table": "osm_highway"
+      },
+      "width_m": {
+        "classify": "highway",
+        "table": "osm_highway_width"
+      },
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "human.road_density",
+      "measure": "density",
+      "value": {
+        "constant": 1
+      },
+      "unit_scale": 0.001,
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 12,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "river",
+            "canal"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 4,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "stream"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "water"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hanmer/osm.geojson",
+      "layer": "human.built_up",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "building"
+        }
+      ]
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "nz.lcdb_class",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_code"
+      }
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "land.cover",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_landcover"
+      }
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "forest.density",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "forest.canopy_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy_height",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "forest.emergent_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_emergent_height"
+      }
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "forest.stand_age",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_stand_age"
+      }
+    },
+    {
+      "path": "hanmer/lcdb.geojson",
+      "layer": "forestry.crop_species",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_crop_species"
+      }
+    },
+    {
+      "path": "hanmer/tenure.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "constant": 1
+      }
+    },
+    {
+      "path": "hanmer/bats.geojson",
+      "layer": "bat.records",
+      "measure": "count"
+    },
+    {
+      "path": "hanmer/bats.geojson",
+      "layer": "bat.species_present",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "species",
+        "fallback": 0
+      }
+    },
+    {
+      "path": "hanmer/bats.geojson",
+      "layer": "bat.last_detected_year",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "year",
+        "fallback": 0
+      }
+    }
+  ],
+  "derive": [
+    "slope_aspect",
+    "hillshade",
+    "distance_to_water",
+    "bat_habitat"
+  ],
+  "build_pyramid": true
+}

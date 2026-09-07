@@ -10,3 +10,11 @@
 
 # NAIP aerial imagery samples: real, redistributable, but large.
 /data/imagery/*.tif
+
+# Fetched New Zealand region data: aerial imagery, DEM, land cover, bat records.
+# tools/fetch-nz-data.sh gets them; a region's imagery alone runs to hundreds of
+# megabytes. The manifests in data/nz/*.json are committed, the data is not.
+/data/nz/*/
+
+# Python bytecode from the tools.
+__pycache__/

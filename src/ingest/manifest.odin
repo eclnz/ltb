@@ -37,9 +37,16 @@ The pile is described in a file rather than in code:
 	    { "path": "buildings.geojson", "layer": "human.built_up",
 	      "measure": "coverage", "coverage_samples": 19 }
 	  ],
-	  "derive": [ "slope_aspect", "hillshade" ],
+	  "derive": [ "slope_aspect", "hillshade", "bat_habitat" ],
 	  "build_pyramid": true
 	}
+
+The derivations, in the order they are worth running: "slope_aspect" and
+"hillshade" from an ingested DEM, "distance_to_water" from permanent water,
+"edge_density" from canopy cover, and "bat_habitat", which runs the New Zealand
+bat model over whatever the rest of the manifest managed to load. A derivation
+computes what the sources imply rather than inventing what they do not cover: it
+writes only where its own inputs are present.
 
 Paths are resolved relative to the manifest. The format is inferred from the
 extension unless "kind" says otherwise. Sources are independent: a source that
@@ -685,6 +692,28 @@ run_derivations :: proc(w: ^world.World, arr: json.Array) {
 			}
 		case "hillshade":
 			derive_hillshade(w, slope, aspect, shade, 0)
+		case "edge_density":
+			canopy, has_canopy := layers.lookup(w.registry, "forest.density")
+			edge, has_edge := layers.lookup(w.registry, "forest.edge_density")
+			if has_canopy && has_edge {
+				derive_edge_density(w, canopy, edge, 0)
+			}
+		case "distance_to_water":
+			water, has_water := layers.lookup(w.registry, "water.permanent")
+			dist, has_dist := layers.lookup(w.registry, "water.distance_to_water")
+			if has_water && has_dist {
+				// Restrict the search to cells canopy cover reached, when there
+				// is any; otherwise let it run over the whole region.
+				canopy, has_canopy := layers.lookup(w.registry, "forest.density")
+				if !has_canopy {
+					canopy = layers.INVALID_LAYER
+				}
+				derive_distance_to_water(w, water, dist, canopy, 0)
+			}
+		case "bat_habitat":
+			// Runs its own edge-density and distance-to-water passes
+			// first, so it stands alone.
+			derive_bat_habitat(w, 0)
 		}
 	}
 }

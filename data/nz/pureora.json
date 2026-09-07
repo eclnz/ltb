@@ -1,0 +1,276 @@
+{
+  "region": {
+    "title": "Pureora Forest Park -- podocarp forest against pine plantation",
+    "lat": -38.47,
+    "lon": 175.63,
+    "span_km": 15,
+    "cell_area": 10000,
+    "levels": 8,
+    "layer": "bat.habitat_suitability"
+  },
+  "about": "Tall podocarp forest -- rimu, matai, totara -- saved from clearfelling in 1978, now sitting hard against exotic plantation and dairy farmland. Both species present. The interesting edge is the reserve boundary itself: long-tailed bats cross it and forage in the plantation, short-tailed bats do not.",
+  "fetch": "tools/fetch-nz-data.sh pureora",
+  "optional": [
+    "pureora/lcdb.geojson needs LRIS_API_KEY; without it OpenStreetMap supplies canopy cover and the structural priors are not written",
+    "pureora/aerial.tif needs LINZ_API_KEY",
+    "pureora/tenure.geojson needs LINZ_API_KEY",
+    "a source that is missing is reported and skipped; the rest still load"
+  ],
+  "sources": [
+    {
+      "path": "pureora/dem.tif",
+      "layer": "terrain.elevation",
+      "resample": "auto"
+    },
+    {
+      "path": "pureora/aerial.tif",
+      "layer": "imagery.true_color",
+      "resample": "auto"
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "landuse",
+          "is": [
+            "forest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "wood",
+            "scrub"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "landuse",
+        "table": "nz_osm_tenure"
+      },
+      "filter": [
+        {
+          "key": "landuse"
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "human.road_class",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "highway",
+        "table": "osm_highway"
+      },
+      "width_m": {
+        "classify": "highway",
+        "table": "osm_highway_width"
+      },
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "human.road_density",
+      "measure": "density",
+      "value": {
+        "constant": 1
+      },
+      "unit_scale": 0.001,
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 12,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "river",
+            "canal"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 4,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "stream"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "water"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "pureora/osm.geojson",
+      "layer": "human.built_up",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "building"
+        }
+      ]
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "nz.lcdb_class",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_code"
+      }
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "land.cover",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_landcover"
+      }
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "forest.density",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "forest.canopy_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy_height",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "forest.emergent_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_emergent_height"
+      }
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "forest.stand_age",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_stand_age"
+      }
+    },
+    {
+      "path": "pureora/lcdb.geojson",
+      "layer": "forestry.crop_species",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_crop_species"
+      }
+    },
+    {
+      "path": "pureora/tenure.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "constant": 1
+      }
+    },
+    {
+      "path": "pureora/bats.geojson",
+      "layer": "bat.records",
+      "measure": "count"
+    },
+    {
+      "path": "pureora/bats.geojson",
+      "layer": "bat.species_present",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "species",
+        "fallback": 0
+      }
+    },
+    {
+      "path": "pureora/bats.geojson",
+      "layer": "bat.last_detected_year",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "year",
+        "fallback": 0
+      }
+    }
+  ],
+  "derive": [
+    "slope_aspect",
+    "hillshade",
+    "distance_to_water",
+    "bat_habitat"
+  ],
+  "build_pyramid": true
+}

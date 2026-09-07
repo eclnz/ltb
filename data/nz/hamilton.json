@@ -1,0 +1,276 @@
+{
+  "region": {
+    "title": "Hamilton and the Waikato River -- urban long-tailed bats",
+    "lat": -37.787,
+    "lon": 175.279,
+    "span_km": 8,
+    "cell_area": 4000,
+    "levels": 8,
+    "layer": "bat.habitat_suitability"
+  },
+  "about": "A city with a resident long-tailed bat population, foraging along the river corridor and the gully network and roosting in old exotic and remnant indigenous trees in parks and private gardens. The limiting factors here are lighting, cats and tree removal for subdivision rather than rats, which makes it the one region where the disturbance term dominates the answer.",
+  "fetch": "tools/fetch-nz-data.sh hamilton",
+  "optional": [
+    "hamilton/lcdb.geojson needs LRIS_API_KEY; without it OpenStreetMap supplies canopy cover and the structural priors are not written",
+    "hamilton/aerial.tif needs LINZ_API_KEY",
+    "hamilton/tenure.geojson needs LINZ_API_KEY",
+    "a source that is missing is reported and skipped; the rest still load"
+  ],
+  "sources": [
+    {
+      "path": "hamilton/dem.tif",
+      "layer": "terrain.elevation",
+      "resample": "auto"
+    },
+    {
+      "path": "hamilton/aerial.tif",
+      "layer": "imagery.true_color",
+      "resample": "auto"
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "landuse",
+          "is": [
+            "forest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "forest.density",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "wood",
+            "scrub"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "landuse",
+        "table": "nz_osm_tenure"
+      },
+      "filter": [
+        {
+          "key": "landuse"
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "human.road_class",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "highway",
+        "table": "osm_highway"
+      },
+      "width_m": {
+        "classify": "highway",
+        "table": "osm_highway_width"
+      },
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "human.road_density",
+      "measure": "density",
+      "value": {
+        "constant": 1
+      },
+      "unit_scale": 0.001,
+      "filter": [
+        {
+          "key": "highway"
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 12,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "river",
+            "canal"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "width_m": 4,
+      "filter": [
+        {
+          "key": "waterway",
+          "is": [
+            "stream"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "water.permanent",
+      "measure": "presence",
+      "filter": [
+        {
+          "key": "natural",
+          "is": [
+            "water"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hamilton/osm.geojson",
+      "layer": "human.built_up",
+      "measure": "coverage",
+      "coverage_samples": 19,
+      "filter": [
+        {
+          "key": "building"
+        }
+      ]
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "nz.lcdb_class",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_code"
+      }
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "land.cover",
+      "measure": "value",
+      "rule": "majority",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_landcover"
+      }
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "forest.density",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "forest.canopy_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_canopy_height",
+        "fallback": 0,
+        "skip_unclassified": false
+      }
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "forest.emergent_height",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_emergent_height"
+      }
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "forest.stand_age",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_stand_age"
+      }
+    },
+    {
+      "path": "hamilton/lcdb.geojson",
+      "layer": "forestry.crop_species",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "classify": "Name_2018",
+        "table": "nz_lcdb_crop_species"
+      }
+    },
+    {
+      "path": "hamilton/tenure.geojson",
+      "layer": "nz.tenure",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "constant": 1
+      }
+    },
+    {
+      "path": "hamilton/bats.geojson",
+      "layer": "bat.records",
+      "measure": "count"
+    },
+    {
+      "path": "hamilton/bats.geojson",
+      "layer": "bat.species_present",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "species",
+        "fallback": 0
+      }
+    },
+    {
+      "path": "hamilton/bats.geojson",
+      "layer": "bat.last_detected_year",
+      "measure": "value",
+      "rule": "max",
+      "value": {
+        "field": "year",
+        "fallback": 0
+      }
+    }
+  ],
+  "derive": [
+    "slope_aspect",
+    "hillshade",
+    "distance_to_water",
+    "bat_habitat"
+  ],
+  "build_pyramid": true
+}
