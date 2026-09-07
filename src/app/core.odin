@@ -86,12 +86,16 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 
 	report_store(&app.store, &app.registry)
 
-	if !sim.init(&app.sim, &app.world, 0, opts.seed) {
-		fmt.eprintln("simulation setup failed: the standard layer catalogue is missing entries")
-		return false
-	}
-	sim.add_default_systems(&app.sim)
+	sim.init(&app.sim, &app.world, 0, opts.seed)
+	sim.add_example_systems(&app.sim)
 	app.sim.clock.days_per_tick = opts.days_per_tick
+	ready := sim.start(&app.sim)
+	for sys in app.sim.systems {
+		if !sys.enabled {
+			fmt.eprintfln("system %q disabled: no layer named %q", sys.name, sys.note)
+		}
+	}
+	fmt.printfln("sim: %d of %d systems ready", ready, len(app.sim.systems))
 
 	if opts.ticks > 0 {
 		run_ticks(&app.sim, opts.ticks)
@@ -120,7 +124,7 @@ run_ticks :: proc(s: ^sim.Sim, n: int) {
 	)
 	for sys in s.systems {
 		if sys.runs > 0 {
-			fmt.printfln("  %-16s %6d runs, %8d cells last pass", sys.name, sys.runs, sys.last_cells)
+			fmt.printfln("  %-16s %6d runs, %8d cells last pass", sys.name, sys.runs, sys.cells_touched)
 		}
 	}
 }

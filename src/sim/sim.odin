@@ -1,165 +1,167 @@
 /*
-Package sim runs the world forward.
+Package sim is the tick machinery, not a game.
 
-Systems are the unit of simulation: each one reads some layers, writes others,
-and declares how often it wants to run. They share no state beyond the layer
-store, so adding a system is adding a file, and a system can be disabled at
-runtime without disturbing the rest.
+It owns a calendar, a list of systems and their cadences, and the bookkeeping
+that keeps the LOD pyramid in step with whatever the systems write. It knows
+nothing about forests, roads or people: a system carries its own layer bindings
+and its own state, so adding a domain means adding a file, and the scheduler
+never grows a field for it.
 
-Every system here works cell-wise over the layers that already exist, sweeping
-resident chunks rather than an index space, so a world costs what its data
-costs.
+A system is three procs and a cadence:
+
+	setup   resolve layer ids, allocate state, refuse to run if a layer is absent
+	update  advance the world by the elapsed days it is handed
+	teardown  release whatever setup allocated
+
+`example_systems.odin` has two small ones to copy from.
 */
 package sim
 
 import "core:math"
 import "core:math/rand"
-import hex "ltb:hex"
 import "ltb:layers"
 import "ltb:world"
 
 // Simulation calendar. One tick is `days_per_tick` days; systems declare their
-// own cadence in days and are run when enough time has accumulated.
+// own cadence in days and run when enough time has accumulated.
 Clock :: struct {
 	tick:          u64,
-	day:           f64, // days since epoch
+	day:           f64, // days since the epoch
 	days_per_tick: f64,
 }
 
-clock_year :: proc(c: Clock, epoch_year := 2025) -> int {
-	return epoch_year + int(c.day / 365.2425)
+EPOCH_YEAR :: 2025
+DAYS_PER_YEAR :: 365.2425
+
+clock_year :: proc(c: Clock, epoch_year := EPOCH_YEAR) -> int {
+	return epoch_year + int(c.day / DAYS_PER_YEAR)
 }
 
 // Day of year in [0, 365).
 clock_day_of_year :: proc(c: Clock) -> f64 {
-	return math.mod(c.day, 365.2425)
+	return math.mod(c.day, DAYS_PER_YEAR)
 }
 
-System_Proc :: proc(s: ^Sim, elapsed_days: f64)
+// Position in the annual cycle, 0 at the start of the year and 1 at the end.
+clock_year_phase :: proc(c: Clock) -> f64 {
+	return clock_day_of_year(c) / DAYS_PER_YEAR
+}
+
+System_Setup :: proc(s: ^Sim, sys: ^System) -> bool
+System_Update :: proc(s: ^Sim, sys: ^System, elapsed_days: f64)
+System_Teardown :: proc(s: ^Sim, sys: ^System)
 
 System :: struct {
 	name:          string,
-	// How many simulated days between runs. Zero runs it every tick.
+	description:   string,
+	// Simulated days between runs. Zero runs the system every tick.
 	interval_days: f64,
 	enabled:       bool,
-	update:        System_Proc,
-	// Days accumulated since this system last ran.
-	accrued:       f64,
-	// Diagnostics, so the UI can show what the simulation is actually doing.
-	last_cells:    int,
-	runs:          u64,
-}
 
-// Layer ids the built-in systems use, resolved once at startup.
-Sim_Layers :: struct {
-	elevation, slope, aspect:                       layers.Layer_Id,
-	temp_mean, precip, humidity, gdd:               layers.Layer_Id,
-	wind_speed, wind_direction:                     layers.Layer_Id,
-	soil_moisture, soil_depth:                      layers.Layer_Id,
-	forest_density, canopy_height, biomass:         layers.Layer_Id,
-	stand_age, health, regeneration, site_index:    layers.Layer_Id,
-	deadwood, litter:                               layers.Layer_Id,
-	fuel_moisture, fire_state, fire_intensity:      layers.Layer_Id,
-	years_since_burn:                               layers.Layer_Id,
-	carbon_stock, carbon_flux:                      layers.Layer_Id,
-	landcover, water_permanent:                     layers.Layer_Id,
+	setup:         System_Setup,
+	update:        System_Update,
+	teardown:      System_Teardown,
+	// Whatever `setup` allocated. The scheduler never looks inside it.
+	state:         rawptr,
+
+	// Scheduler bookkeeping.
+	accrued:       f64,
+	runs:          u64,
+	// Diagnostics for the HUD and the headless report; a system sets these.
+	cells_touched: int,
+	note:          string,
 }
 
 Sim :: struct {
-	world:        ^world.World,
-	clock:        Clock,
-	systems:      [dynamic]System,
-	ids:          Sim_Layers,
-	level:        int, // level the systems operate on
-	rng:          rand.Generator,
-	rng_state:    rand.Default_Random_State,
-	// Rebuild the pyramid for layers the systems write, every N ticks. Coarse
-	// levels only feed display and broad-phase queries, so they can lag.
+	world:         ^world.World,
+	clock:         Clock,
+	systems:       [dynamic]System,
+	// Pyramid level the systems operate on. Coarser levels are derived.
+	level:         int,
+	rng:           rand.Generator,
+	rng_state:     rand.Default_Random_State,
+	// Rebuild coarse levels for dirtied layers every N ticks. Coarse levels
+	// only feed display and broad-phase queries, so they can lag behind.
 	pyramid_every: u64,
-	dirty_layers: map[layers.Layer_Id]bool,
+	dirty:         map[layers.Layer_Id]bool,
+	started:       bool,
 }
 
-init :: proc(s: ^Sim, w: ^world.World, level := 0, seed: u64 = 1, allocator := context.allocator) -> bool {
+init :: proc(s: ^Sim, w: ^world.World, level := 0, seed: u64 = 1, allocator := context.allocator) {
 	s.world = w
 	s.level = level
 	s.clock = Clock {
 		days_per_tick = 1.0,
 	}
 	s.systems = make([dynamic]System, allocator)
-	s.dirty_layers = make(map[layers.Layer_Id]bool, 32, allocator)
+	s.dirty = make(map[layers.Layer_Id]bool, 32, allocator)
 	s.pyramid_every = 64
 	s.rng_state = rand.create(seed)
 	s.rng = rand.default_random_generator(&s.rng_state)
-	return resolve(s)
 }
 
 destroy :: proc(s: ^Sim) {
-	delete(s.systems)
-	delete(s.dirty_layers)
-}
-
-@(private)
-resolve :: proc(s: ^Sim) -> bool {
-	ok := true
-	get :: proc(r: ^layers.Registry, name: string, ok: ^bool) -> layers.Layer_Id {
-		id, found := layers.lookup(r, name)
-		if !found {
-			ok^ = false
+	for &sys in s.systems {
+		if sys.teardown != nil {
+			sys.teardown(s, &sys)
 		}
-		return id
 	}
-	r := s.world.registry
-	s.ids.elevation = get(r, "terrain.elevation", &ok)
-	s.ids.slope = get(r, "terrain.slope", &ok)
-	s.ids.aspect = get(r, "terrain.aspect", &ok)
-	s.ids.temp_mean = get(r, "climate.temp_mean_annual", &ok)
-	s.ids.precip = get(r, "climate.precip_annual", &ok)
-	s.ids.humidity = get(r, "climate.humidity", &ok)
-	s.ids.gdd = get(r, "climate.growing_degree_days", &ok)
-	s.ids.wind_speed = get(r, "climate.wind_speed", &ok)
-	s.ids.wind_direction = get(r, "climate.wind_direction", &ok)
-	s.ids.soil_moisture = get(r, "soil.moisture", &ok)
-	s.ids.soil_depth = get(r, "soil.depth", &ok)
-	s.ids.forest_density = get(r, "forest.density", &ok)
-	s.ids.canopy_height = get(r, "forest.canopy_height", &ok)
-	s.ids.biomass = get(r, "forest.biomass_above_ground", &ok)
-	s.ids.stand_age = get(r, "forest.stand_age", &ok)
-	s.ids.health = get(r, "forest.health", &ok)
-	s.ids.regeneration = get(r, "forest.regeneration", &ok)
-	s.ids.site_index = get(r, "forest.site_index", &ok)
-	s.ids.deadwood = get(r, "forest.deadwood_load", &ok)
-	s.ids.litter = get(r, "forest.litter_load", &ok)
-	s.ids.fuel_moisture = get(r, "fire.fuel_moisture", &ok)
-	s.ids.fire_state = get(r, "fire.state", &ok)
-	s.ids.fire_intensity = get(r, "fire.intensity", &ok)
-	s.ids.years_since_burn = get(r, "fire.years_since_burn", &ok)
-	s.ids.carbon_stock = get(r, "sim.carbon_stock", &ok)
-	s.ids.carbon_flux = get(r, "sim.carbon_flux", &ok)
-	s.ids.landcover = get(r, "land.cover", &ok)
-	s.ids.water_permanent = get(r, "water.permanent", &ok)
-	return ok
+	delete(s.systems)
+	delete(s.dirty)
+	s^ = {}
 }
 
-add_system :: proc(s: ^Sim, name: string, interval_days: f64, update: System_Proc, enabled := true) {
-	append(&s.systems, System{name = name, interval_days = interval_days, enabled = enabled, update = update})
+// Registers a system. It is not usable until `start` has run its setup.
+add_system :: proc(s: ^Sim, sys: System) {
+	sy := sys
+	if sy.enabled == false && sy.setup == nil && sy.update == nil {
+		return
+	}
+	append(&s.systems, sy)
 }
 
-// Registers the built-in systems in the order they should run: the physical
-// environment first, then vegetation, then disturbance.
-add_default_systems :: proc(s: ^Sim) {
-	add_system(s, "moisture", 7, system_moisture)
-	add_system(s, "forest growth", 30, system_forest_growth)
-	add_system(s, "fuel", 30, system_fuel)
-	add_system(s, "fire", 1, system_fire)
-	add_system(s, "carbon", 365, system_carbon)
+// Convenience for the common case of a system with no setup or state.
+add_simple_system :: proc(s: ^Sim, name: string, interval_days: f64, update: System_Update) {
+	add_system(s, System{name = name, interval_days = interval_days, enabled = true, update = update})
 }
 
-// Marks a layer as changed, so its coarse levels get rebuilt.
+// Runs every system's setup. A system whose setup fails -- usually because a
+// layer it needs is not registered -- is disabled rather than fatal, so a world
+// missing one dataset still runs everything else.
+//
+// Returns the number of systems that came up.
+start :: proc(s: ^Sim) -> (ready: int) {
+	for &sys in s.systems {
+		if sys.setup != nil {
+			if !sys.setup(s, &sys) {
+				sys.enabled = false
+				continue
+			}
+		}
+		if sys.update != nil {
+			sys.enabled = true
+			ready += 1
+		}
+	}
+	s.started = true
+	return
+}
+
+find_system :: proc(s: ^Sim, name: string) -> ^System {
+	for &sys in s.systems {
+		if sys.name == name {
+			return &sys
+		}
+	}
+	return nil
+}
+
+// Marks a layer as changed, so its coarse levels get rebuilt at the next flush.
 mark_dirty :: proc(s: ^Sim, id: layers.Layer_Id) {
-	s.dirty_layers[id] = true
+	s.dirty[id] = true
 }
 
-// Advances the clock by one tick and runs whichever systems are due.
+// Advances the clock one tick and runs whichever systems are due.
 step :: proc(s: ^Sim) {
 	dt := s.clock.days_per_tick
 	s.clock.tick += 1
@@ -175,7 +177,7 @@ step :: proc(s: ^Sim) {
 		}
 		elapsed := sys.accrued
 		sys.accrued = 0
-		sys.update(s, elapsed)
+		sys.update(s, &sys, elapsed)
 		sys.runs += 1
 	}
 
@@ -184,23 +186,47 @@ step :: proc(s: ^Sim) {
 	}
 }
 
+run :: proc(s: ^Sim, ticks: int) {
+	for _ in 0 ..< ticks {
+		step(s)
+	}
+}
+
 // Rebuilds coarse levels for every layer a system has written since the last
 // flush.
 flush_pyramid :: proc(s: ^Sim) -> (rebuilt: int) {
-	if len(s.dirty_layers) == 0 {
+	if len(s.dirty) == 0 {
 		return 0
 	}
-	for id in s.dirty_layers {
+	for id in s.dirty {
 		world.build_pyramid(s.world, id, s.level)
 		rebuilt += 1
 	}
-	clear(&s.dirty_layers)
+	clear(&s.dirty)
 	return
 }
 
-// Runs `n` ticks.
-run :: proc(s: ^Sim, n: int) {
-	for _ in 0 ..< n {
-		step(s)
+// ---------------------------------------------------------------------------
+// Helpers for writing systems
+// ---------------------------------------------------------------------------
+
+// The store level the systems run on, as the u8 the layer API wants.
+level_of :: #force_inline proc "contextless" (s: ^Sim) -> u8 {
+	return u8(s.level)
+}
+
+// Resolves a set of layer names in one go. Returns false and names the first
+// missing layer, which is what a system's setup should report.
+resolve_layers :: proc(s: ^Sim, names: []string, out: []layers.Layer_Id) -> (missing: string, ok: bool) {
+	if len(out) < len(names) {
+		return "", false
 	}
+	for name, i in names {
+		id, found := layers.lookup(s.world.registry, name)
+		if !found {
+			return name, false
+		}
+		out[i] = id
+	}
+	return "", true
 }
