@@ -359,6 +359,16 @@ bounds_contains :: proc "contextless" (b: Bounds, h: Hex) -> bool {
 	return h.q >= b.q0 && h.q <= b.q1 && h.r >= b.r0 && h.r <= b.r1
 }
 
+// The overlap of two bounds. Empty when they do not overlap.
+bounds_intersect :: proc "contextless" (a, b: Bounds) -> Bounds {
+	return Bounds {
+		q0 = max(a.q0, b.q0),
+		r0 = max(a.r0, b.r0),
+		q1 = min(a.q1, b.q1),
+		r1 = min(a.r1, b.r1),
+	}
+}
+
 // Axial bounds guaranteed to contain every cell whose centre lies inside the
 // world-space rectangle [min, max]. The four rectangle corners bound the axial
 // region because the inverse layout transform is affine, and one extra cell of

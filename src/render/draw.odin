@@ -17,6 +17,9 @@ View :: struct {
 	show_grid:      bool,
 	// Overrides the automatic level. -1 follows the zoom.
 	force_level:    int,
+	// Stretches the palette across the values present at the drawn level
+	// instead of the descriptor's declared range.
+	auto_range:     bool,
 	// Cell outline colour, used when `show_grid` is set.
 	grid_color:     rl.Color,
 	background:     rl.Color,
@@ -31,6 +34,7 @@ default_view :: proc(layer: layers.Layer_Id) -> View {
 		shade_strength = 0.45,
 		show_grid = false,
 		force_level = -1,
+		auto_range = true,
 		grid_color = rl.Color{0, 0, 0, 60},
 		background = rl.Color{14, 16, 20, 255},
 		fill_from_coarser = true,
@@ -42,10 +46,71 @@ Stats :: struct {
 	cells_drawn:  int,
 	cells_missing: int,
 	bounds:       hex.Bounds,
+	// Value range the palette was stretched across.
+	range_lo:     f64,
+	range_hi:     f64,
+}
+
+Range_Key :: struct {
+	layer: layers.Layer_Id,
+	level: u8,
+}
+
+Value_Range :: struct {
+	lo, hi: f64,
+}
+
+// Holds what the renderer caches between frames.
+Renderer :: struct {
+	ranges: map[Range_Key]Value_Range,
+}
+
+renderer_init :: proc(r: ^Renderer, allocator := context.allocator) {
+	r.ranges = make(map[Range_Key]Value_Range, 64, allocator)
+}
+
+renderer_destroy :: proc(r: ^Renderer) {
+	delete(r.ranges)
+	r^ = {}
+}
+
+// Drops a cached value range, so the next frame recomputes it. Call after a
+// system has rewritten a layer.
+renderer_invalidate :: proc(r: ^Renderer, layer: layers.Layer_Id) {
+	for key in r.ranges {
+		if key.layer == layer {
+			delete_key(&r.ranges, key)
+		}
+	}
+}
+
+// The range of values present in a layer at one level, cached.
+value_range :: proc(r: ^Renderer, w: ^world.World, layer: layers.Layer_Id, level: int) -> Value_Range {
+	key := Range_Key{layer, u8(level)}
+	if v, ok := r.ranges[key]; ok {
+		return v
+	}
+	d := layers.desc_of(w.registry, layer)
+	out := Value_Range{d.min_value, d.max_value}
+
+	cells := layers.collect_cells(w.store, layer, u8(level), context.temp_allocator)
+	defer delete(cells, context.temp_allocator)
+	if len(cells) > 0 {
+		lo, hi := cells[0].value, cells[0].value
+		for c in cells[1:] {
+			lo = math.min(lo, c.value)
+			hi = math.max(hi, c.value)
+		}
+		if hi > lo {
+			out = Value_Range{lo, hi}
+		}
+	}
+	r.ranges[key] = out
+	return out
 }
 
 // Draws one layer over the visible area. Returns what it did, for the HUD.
-draw_layer :: proc(w: ^world.World, cam: ^Camera, view: View) -> (stats: Stats) {
+draw_layer :: proc(r: ^Renderer, w: ^world.World, cam: ^Camera, view: View) -> (stats: Stats) {
 	level, bounds := camera_visible(cam, w)
 	if view.force_level >= 0 {
 		level = clamp(view.force_level, 0, world.level_count(w) - 1)
@@ -64,7 +129,17 @@ draw_layer :: proc(w: ^world.World, cam: ^Camera, view: View) -> (stats: Stats) 
 
 	// Cell radius in pixels.
 	radius_px := f32(math.sqrt(lay.size.x * lay.size.y) / cam.metres_per_pixel)
-	rotation := f32(lay.orientation.start_angle == 0.5 ? 0.0 : 30.0)
+	// `start_angle` is the first corner's position in sixths of a turn, which
+	// is the rotation raylib wants in degrees.
+	rotation := f32(lay.orientation.start_angle * 60.0)
+
+	stats.range_lo = desc.min_value
+	stats.range_hi = desc.max_value
+	if view.auto_range && desc.semantic != .Composition && desc.semantic != .Categorical {
+		vr := value_range(r, w, view.layer, level)
+		stats.range_lo, stats.range_hi = vr.lo, vr.hi
+	}
+	span := stats.range_hi - stats.range_lo
 
 	nc := layers.desc_components(desc)
 	comps: [layers.MAX_ACCUM_COMPONENTS]f64
@@ -101,9 +176,15 @@ draw_layer :: proc(w: ^world.World, cam: ^Camera, view: View) -> (stats: Stats) 
 				continue
 			}
 
-			rgb := desc.semantic == .Composition \
-				? layers.composition_color(desc, comps[:nc]) \
-				: layers.value_color(desc, value)
+			rgb: layers.RGB
+			if desc.semantic == .Composition {
+				rgb = layers.composition_color(desc, comps[:nc])
+			} else if desc.semantic == .Categorical || desc.semantic == .Boolean {
+				rgb = layers.value_color(desc, value)
+			} else {
+				t := span > 0 ? (value - stats.range_lo) / span : 0
+				rgb = layers.palette_sample(desc.palette, t)
+			}
 
 			if view.shade_strength > 0 && has_shade {
 				if s, got := layers.get(w.store, shade_id, u8(draw_level), draw_level == level ? h : world.to_level(h, level, draw_level)); got {
@@ -146,9 +227,17 @@ draw_cell_outline :: proc(w: ^world.World, cam: ^Camera, level: int, h: hex.Hex,
 // Legend and readouts
 // ---------------------------------------------------------------------------
 
-// Draws a colour ramp with min/max labels, or a class list for a categorical
-// or composition layer.
-draw_legend :: proc(w: ^world.World, layer: layers.Layer_Id, x, y: i32, width: i32 = 200) -> (height: i32) {
+// Draws a colour ramp labelled with the range it spans, or a class list for a
+// categorical or composition layer.
+draw_legend :: proc(
+	w: ^world.World,
+	layer: layers.Layer_Id,
+	x, y: i32,
+	lo, hi: f64,
+	width: i32 = 200,
+) -> (
+	height: i32,
+) {
 	desc := layers.desc_of(w.registry, layer)
 	if desc == nil {
 		return 0
@@ -172,10 +261,10 @@ draw_legend :: proc(w: ^world.World, layer: layers.Layer_Id, x, y: i32, width: i
 			rl.DrawRectangle(x + i, cy, 1, bar_h, rl.Color{c.r, c.g, c.b, 255})
 		}
 		cy += bar_h + 3
-		lo := fmt.ctprintf("%.4g", desc.min_value)
-		hi := fmt.ctprintf("%.4g %s", desc.max_value, desc.unit)
-		rl.DrawText(lo, x, cy, 12, rl.LIGHTGRAY)
-		rl.DrawText(hi, x + width - rl.MeasureText(hi, 12), cy, 12, rl.LIGHTGRAY)
+		lo_text := fmt.ctprintf("%.4g", lo)
+		hi_text := fmt.ctprintf("%.4g %s", hi, desc.unit)
+		rl.DrawText(lo_text, x, cy, 12, rl.LIGHTGRAY)
+		rl.DrawText(hi_text, x + width - rl.MeasureText(hi_text, 12), cy, 12, rl.LIGHTGRAY)
 		cy += 16
 	}
 	return cy - y + pad

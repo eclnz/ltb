@@ -112,7 +112,13 @@ rasterize :: proc(
 		}
 	}
 
-	bounds := o.limit.? or_else world.bounds_for_geo(w, o.level, raster_geo_bounds(r))
+	bounds := hex.bounds_intersect(
+		o.limit.? or_else world.bounds_for_geo(w, o.level, raster_geo_bounds(r)),
+		world.extent(w, o.level),
+	)
+	if hex.bounds_is_empty(bounds) {
+		return {}, .None
+	}
 	if hex.bounds_count(bounds) > o.max_cells {
 		return {}, .Too_Many_Cells
 	}

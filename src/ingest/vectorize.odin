@@ -1,6 +1,7 @@
 package ingest
 
 import "core:math"
+import "core:slice"
 import geo "ltb:geo"
 import hex "ltb:hex"
 import "ltb:layers"
@@ -27,7 +28,7 @@ classification of a text attribute such as OSM's `highway` tag.
 Measure :: enum u8 {
 	Presence, // 1 where any matching feature touches the cell
 	Count,    // number of matching features touching the cell
-	Density,  // features (or metres of line) per square kilometre
+	Density,  // summed feature value per square kilometre; metres of line for a line
 	Value,    // the feature's value, combined by `rule`
 	Coverage, // fraction of the cell covered by matching polygons
 }
@@ -105,7 +106,10 @@ Vector_Options :: struct {
 Vector_Result :: struct {
 	cells_written:    int,
 	features_used:    int,
+	// Rejected by the filter.
 	features_skipped: int,
+	// Outside the world.
+	features_outside: int,
 	line_metres:      f64,
 }
 
@@ -160,7 +164,15 @@ vectorize :: proc(
 
 	lay := world.layout(w, o.level)
 	cell_area_km2 := lay_cell_area_km2(lay)
-	bounds := o.limit.? or_else world_bounds_of(pts, lay)
+	// Clip to the world. A global dataset is normal input; only the part of it
+	// covering this world is written.
+	bounds := hex.bounds_intersect(
+		o.limit.? or_else world_bounds_of(pts, lay),
+		world.extent(w, o.level),
+	)
+	if hex.bounds_is_empty(bounds) {
+		return {}, .None
+	}
 	if hex.bounds_count(bounds) > o.max_cells {
 		return {}, .Too_Many_Cells
 	}
@@ -173,9 +185,17 @@ vectorize :: proc(
 	pitch := hex.cell_pitch(lay)
 	step := math.max(pitch * o.line_step_fraction, 1.0)
 
+	// World-space box of the write region, with a cell of margin, so a feature
+	// entirely outside it is rejected before any of its geometry is walked.
+	clip_min, clip_max := hex.bounds_world_aabb(lay, bounds)
+
 	for f in fc.features {
 		if len(o.filter) > 0 && !feature_matches(f, o.filter) {
 			res.features_skipped += 1
+			continue
+		}
+		if !feature_overlaps(fc, f, pts, clip_min, clip_max) {
+			res.features_outside += 1
 			continue
 		}
 		v, has_value := feature_value(f, o.value)
@@ -256,12 +276,10 @@ measure_rule :: proc(m: Measure, d: ^layers.Layer_Desc) -> layers.Aggregate {
 @(private)
 point_contribution :: proc(m: Measure, value, cell_area_km2: f64) -> f64 {
 	switch m {
-	case .Presence:
-		return 1
-	case .Count:
+	case .Presence, .Count:
 		return 1
 	case .Density:
-		return 1.0 / cell_area_km2
+		return value / cell_area_km2
 	case .Value, .Coverage:
 		return value
 	}
@@ -271,6 +289,28 @@ point_contribution :: proc(m: Measure, value, cell_area_km2: f64) -> f64 {
 @(private)
 lay_cell_area_km2 :: proc(lay: hex.Layout) -> f64 {
 	return math.max(hex.cell_area(lay) / 1e6, 1e-9)
+}
+
+// True when any of a feature's vertices could put it inside the clip box.
+@(private)
+feature_overlaps :: proc(
+	fc: ^Feature_Collection,
+	f: Feature,
+	pts: []geo.Point,
+	clip_min, clip_max: geo.Point,
+) -> bool {
+	mn := geo.Point{math.INF_F64, math.INF_F64}
+	mx := geo.Point{-math.INF_F64, -math.INF_F64}
+	for r in feature_rings(fc, f) {
+		for i in r.start ..< r.start + r.count {
+			p := pts[i]
+			mn.x = math.min(mn.x, p.x)
+			mn.y = math.min(mn.y, p.y)
+			mx.x = math.max(mx.x, p.x)
+			mx.y = math.max(mx.y, p.y)
+		}
+	}
+	return !(mx.x < clip_min.x || mn.x > clip_max.x || mx.y < clip_min.y || mn.y > clip_max.y)
 }
 
 @(private)
@@ -349,7 +389,7 @@ walk_segment :: proc(
 		case .Presence, .Count:
 			buf[0] = 1
 		case .Density:
-			buf[0] = seg_len / cell_area_km2 * unit_scale
+			buf[0] = seg_len * value / cell_area_km2 * unit_scale
 		case .Value, .Coverage:
 			buf[0] = value
 		}
@@ -358,6 +398,16 @@ walk_segment :: proc(
 	return
 }
 
+// Fills the cells a polygon covers, by scanline.
+//
+// A hex layout has one axis along which cell centres share a world coordinate:
+// for a pointy-top layout an axial row r is a horizontal line, for a flat-top
+// layout an axial column q is a vertical line. Walking those lines and
+// intersecting them with the polygon's edges costs one pass over the edges per
+// line, rather than one pass per cell.
+//
+// Coverage is estimated from three lines per cell and three positions along
+// each, so a boundary cell gets a fraction in ninths.
 @(private)
 fill_polygon :: proc(
 	a: ^layers.Accumulator,
@@ -370,8 +420,8 @@ fill_polygon :: proc(
 	value, cell_area_km2: f64,
 	buf: ^[1]f64,
 ) {
-	// Bounding box of this polygon only, not the whole dataset's extent.
-	mn, mx := geo.Point{math.INF_F64, math.INF_F64}, geo.Point{-math.INF_F64, -math.INF_F64}
+	mn := geo.Point{math.INF_F64, math.INF_F64}
+	mx := geo.Point{-math.INF_F64, -math.INF_F64}
 	for r in rings {
 		for i in r.start ..< r.start + r.count {
 			p := pts[i]
@@ -381,38 +431,104 @@ fill_polygon :: proc(
 			mx.y = math.max(mx.y, p.y)
 		}
 	}
-	local := hex.bounds_covering_rect(lay, mn, mx)
-	local.q0 = max(local.q0, bounds.q0)
-	local.r0 = max(local.r0, bounds.r0)
-	local.q1 = min(local.q1, bounds.q1)
-	local.r1 = min(local.r1, bounds.r1)
+	local := hex.bounds_intersect(hex.bounds_covering_rect(lay, mn, mx), bounds)
 	if hex.bounds_is_empty(local) {
 		return
 	}
 
-	samples: [19][2]f64
-	n_samples := sample_pattern(lay, o.coverage_samples, &samples)
+	pointy := lay.orientation.start_angle == 0.5
+	radius := math.sqrt(lay.size.x * lay.size.y)
 
-	for rr in local.r0 ..= local.r1 {
-		for qq in local.q0 ..= local.q1 {
-			h := hex.Hex{qq, rr}
-			c := hex.to_world(lay, h)
-			inside := 0
-			for i in 0 ..< n_samples {
-				p := geo.Point{c.x + samples[i].x, c.y + samples[i].y}
-				if point_in_rings(pts, rings, p) {
-					inside += 1
+	// Sub-line and sub-position offsets within a cell, as fractions of the
+	// circumradius.
+	sub := [3]f64{-0.45, 0.0, 0.45}
+	n_sub := o.coverage_samples <= 1 ? 1 : 3
+	lo_sub := n_sub == 1 ? 1 : 0
+	hi_sub := n_sub == 1 ? 1 : 2
+
+	crossings := make([dynamic]f64, 0, 256, context.temp_allocator)
+	defer delete(crossings)
+
+	scan_lo := pointy ? local.r0 : local.q0
+	scan_hi := pointy ? local.r1 : local.q1
+	vary_lo := pointy ? local.q0 : local.r0
+	vary_hi := pointy ? local.q1 : local.r1
+
+	for scan in scan_lo ..= scan_hi {
+		// Accumulated hits per cell along this line.
+		hits := make([]u8, int(vary_hi - vary_lo + 1), context.temp_allocator)
+		defer delete(hits, context.temp_allocator)
+
+		for si in lo_sub ..= hi_sub {
+			// World position of the scan line, offset within the cell.
+			anchor := pointy \
+				? hex.to_world(lay, hex.Hex{0, scan}) \
+				: hex.to_world(lay, hex.Hex{scan, 0})
+			line := (pointy ? anchor.y : anchor.x) + sub[si] * radius
+
+			clear(&crossings)
+			for r in rings {
+				if r.count < 3 {
+					continue
+				}
+				j := r.start + r.count - 1
+				for i in r.start ..< r.start + r.count {
+					p0 := pts[j]
+					p1 := pts[i]
+					j = i
+					a0 := pointy ? p0.y : p0.x
+					a1 := pointy ? p1.y : p1.x
+					if (a0 > line) == (a1 > line) {
+						continue
+					}
+					b0 := pointy ? p0.x : p0.y
+					b1 := pointy ? p1.x : p1.y
+					t := (line - a0) / (a1 - a0)
+					append(&crossings, b0 + (b1 - b0) * t)
 				}
 			}
-			if inside == 0 {
+			if len(crossings) < 2 {
 				continue
 			}
-			frac := f64(inside) / f64(n_samples)
+			slice.sort(crossings[:])
+
+			// Even-odd: the polygon's interior lies between crossing pairs.
+			for k := 0; k + 1 < len(crossings); k += 2 {
+				span_lo := crossings[k]
+				span_hi := crossings[k + 1]
+				for idx in vary_lo ..= vary_hi {
+					h := pointy ? hex.Hex{idx, scan} : hex.Hex{scan, idx}
+					c := hex.to_world(lay, h)
+					base := pointy ? c.x : c.y
+					if base + radius < span_lo {
+						continue
+					}
+					if base - radius > span_hi {
+						break
+					}
+					for pi in lo_sub ..= hi_sub {
+						p := base + sub[pi] * radius
+						if p >= span_lo && p <= span_hi {
+							hits[idx - vary_lo] += 1
+						}
+					}
+				}
+			}
+		}
+
+		total := u8(n_sub * n_sub)
+		for idx in vary_lo ..= vary_hi {
+			n := hits[idx - vary_lo]
+			if n == 0 {
+				continue
+			}
+			h := pointy ? hex.Hex{idx, scan} : hex.Hex{scan, idx}
+			frac := f64(min(n, total)) / f64(total)
 			switch o.measure {
 			case .Presence, .Count:
 				buf[0] = 1
 			case .Density:
-				buf[0] = o.unit_scale / cell_area_km2
+				buf[0] = value * o.unit_scale / cell_area_km2
 			case .Value:
 				buf[0] = value
 			case .Coverage:
@@ -421,54 +537,4 @@ fill_polygon :: proc(
 			layers.accum_add(a, h, buf[:])
 		}
 	}
-}
-
-// Sample offsets within a cell: the centre, then rings of six.
-@(private)
-sample_pattern :: proc(lay: hex.Layout, wanted: int, out: ^[19][2]f64) -> int {
-	r := math.sqrt(lay.size.x * lay.size.y)
-	out[0] = {0, 0}
-	if wanted <= 1 {
-		return 1
-	}
-	n := 1
-	for ring in 1 ..= 3 {
-		radius := r * (0.35 * f64(ring))
-		phase := ring % 2 == 0 ? math.PI / 6.0 : 0.0
-		for k in 0 ..< 6 {
-			if n >= wanted || n >= 19 {
-				return n
-			}
-			ang := phase + f64(k) * math.PI / 3.0
-			out[n] = {radius * math.cos(ang), radius * math.sin(ang)}
-			n += 1
-		}
-	}
-	return n
-}
-
-// Even-odd crossing test against every ring at once, which handles holes
-// correctly whichever way they are wound. Real exports are inconsistent about
-// winding.
-@(private)
-point_in_rings :: proc(pts: []geo.Point, rings: []Ring, p: geo.Point) -> bool {
-	inside := false
-	for r in rings {
-		if r.count < 3 {
-			continue
-		}
-		j := r.start + r.count - 1
-		for i in r.start ..< r.start + r.count {
-			a := pts[i]
-			b := pts[j]
-			if (a.y > p.y) != (b.y > p.y) {
-				x := (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x
-				if p.x < x {
-					inside = !inside
-				}
-			}
-			j = i
-		}
-	}
-	return inside
 }

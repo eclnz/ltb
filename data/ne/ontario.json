@@ -1,0 +1,67 @@
+{
+  "layers": [
+    {
+      "name": "human.settlement_population",
+      "group": "human",
+      "unit": "people",
+      "description": "population of the settlement whose label point falls in this cell",
+      "type": "u32", "scale": 1,
+      "semantic": "scalar", "aggregate": "max",
+      "min": 0, "max": 6000000,
+      "palette": "heat"
+    },
+    {
+      "name": "logistics.haul_speed",
+      "group": "logistics",
+      "unit": "km/h",
+      "description": "free-flow speed of the fastest road in the cell",
+      "type": "u8", "scale": 0.5,
+      "semantic": "scalar", "aggregate": "max",
+      "min": 0, "max": 120,
+      "palette": "viridis"
+    }
+  ],
+
+  "sources": [
+    { "path": "n43.tif", "layer": "terrain.elevation", "resample": "auto" },
+
+    { "path": "ne_10m_land.geojson", "layer": "land.cover",
+      "measure": "value", "rule": "max", "value": { "constant": 5 } },
+
+    { "path": "ne_10m_lakes.geojson", "layer": "land.cover",
+      "measure": "value", "rule": "max", "value": { "constant": 0 } },
+
+    { "path": "ne_10m_lakes.geojson", "layer": "water.permanent",
+      "measure": "presence" },
+
+    { "path": "ne_10m_rivers_lake_centerlines.geojson", "layer": "water.permanent",
+      "measure": "presence" },
+
+    { "path": "ne_10m_urban_areas.geojson", "layer": "human.built_up",
+      "measure": "coverage", "coverage_samples": 19 },
+
+    { "path": "ne_10m_urban_areas.geojson", "layer": "land.cover",
+      "measure": "value", "rule": "max", "value": { "constant": 13 } },
+
+    { "path": "ne_10m_roads.geojson", "layer": "human.road_class",
+      "measure": "value", "rule": "max",
+      "value": { "classify": "type", "table": "ne_road" },
+      "filter": [ { "key": "type", "not": ["Ferry Route", "Ferry, seasonal"] } ] },
+
+    { "path": "ne_10m_roads.geojson", "layer": "logistics.haul_speed",
+      "measure": "value", "rule": "max",
+      "value": { "classify": "type", "table": "ne_road_speed" },
+      "filter": [ { "key": "type", "not": ["Ferry Route", "Ferry, seasonal"] } ] },
+
+    { "path": "ne_10m_roads.geojson", "layer": "human.road_density",
+      "measure": "density", "value": { "constant": 1 }, "unit_scale": 0.001,
+      "filter": [ { "key": "type", "not": ["Ferry Route", "Ferry, seasonal"] } ] },
+
+    { "path": "ne_10m_populated_places.geojson", "layer": "human.settlement_population",
+      "measure": "value", "rule": "max",
+      "value": { "field": "POP_MAX", "scale": 1, "fallback": 0 } }
+  ],
+
+  "derive": [ "slope_aspect", "hillshade" ],
+  "build_pyramid": true
+}

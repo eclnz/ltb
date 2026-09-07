@@ -155,7 +155,15 @@ load_manifest :: proc(w: ^world.World, path: string) {
 	}
 	for s in report.sources {
 		mark := s.ok ? "ok  " : "FAIL"
-		fmt.printfln("  %s %-28s -> %-32s %s", mark, s.path, s.layer, s.message)
+		fmt.printfln(
+			"  %s %-28s -> %-28s %6.2fs (%5.2fs read)  %s",
+			mark,
+			s.path,
+			s.layer,
+			s.seconds,
+			s.read_seconds,
+			s.message,
+		)
 	}
 	fmt.printfln(
 		"manifest: %d of %d sources loaded in %.2f s",

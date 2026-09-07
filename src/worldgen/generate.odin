@@ -12,7 +12,8 @@ Params :: struct {
 	seed:              u64,
 	// Level to generate at. Coarser levels are built by the pyramid afterwards.
 	level:             int,
-	// Horizontal size of the largest terrain features, in metres.
+	// Horizontal size of the largest terrain features, in metres. Zero derives
+	// it from the region being generated.
 	terrain_scale:     f64,
 	sea_level:         f64, // metres
 	max_elevation:     f64, // metres
@@ -30,7 +31,7 @@ default_params :: proc() -> Params {
 	return Params {
 		seed = 0x5EED_1234_ABCD_0001,
 		level = 0,
-		terrain_scale = 90_000,
+		terrain_scale = 0,
 		sea_level = 0,
 		max_elevation = 2400,
 		land_fraction = 0.62,
@@ -114,7 +115,12 @@ generate :: proc(w: ^world.World, p: Params, bounds: Maybe(hex.Bounds) = nil) ->
 	noise_init(&climate_noise, p.seed ~ 0x94D0_49BB_1331_11EB)
 	noise_init(&soil_noise, p.seed ~ 0x2545_F491_4F6C_DD1D)
 
-	inv_scale := 1.0 / math.max(1.0, p.terrain_scale)
+	terrain_scale := p.terrain_scale
+	if terrain_scale <= 0 {
+		mn, mx := hex.bounds_world_aabb(lay, region)
+		terrain_scale = math.max(mx.x - mn.x, mx.y - mn.y) / 2.5
+	}
+	inv_scale := 1.0 / math.max(1.0, terrain_scale)
 
 	// ---- terrain -------------------------------------------------------
 	// Domain warping first: it turns the noise's obvious grid alignment into
@@ -266,6 +272,9 @@ generate :: proc(w: ^world.World, p: Params, bounds: Maybe(hex.Bounds) = nil) ->
 			slope := layers.get_or(w.store, ids.slope, lvl, h, 0)
 			moisture := layers.get_or(w.store, ids.soil_moisture, lvl, h, 0.4)
 			soil_d := layers.get_or(w.store, ids.soil_depth, lvl, h, 1)
+			wp := hex.to_world(lay, h)
+			x := wp.x * inv_scale
+			y := wp.y * inv_scale
 
 			// Tree cover: needs warmth, water and something to root in, and
 			// thins out on the steepest, thinnest ground.
@@ -304,14 +313,21 @@ generate :: proc(w: ^world.World, p: Params, bounds: Maybe(hex.Bounds) = nil) ->
 				// Species mix follows the climate niches. Everything is scored,
 				// then normalised, so the mix shifts gradually across gradients
 				// instead of snapping between types.
-				comp[0] = niche(temp, -6, 12) * niche(precip, 500, 2600) // evergreen conifer
-				comp[1] = niche(temp, -12, 2) * niche(precip, 250, 900) // deciduous conifer
-				comp[2] = niche(temp, 12, 27) * niche(precip, 1200, 4000) // evergreen broadleaf
-				comp[3] = niche(temp, 5, 18) * niche(precip, 600, 1800) // deciduous broadleaf
-				comp[4] = niche(temp, 13, 26) * niche(precip, 200, 750) // sclerophyll
-				comp[5] = niche(temp, 12, 22) * niche(precip, 1800, 5000) * 0.6 // tree fern
-				comp[6] = elev < 6 ? niche(temp, 20, 30) * 0.8 : 0.0 // mangrove
-				comp[7] = (slope < 18 && soil_d > 0.6) ? 0.25 : 0.05 // plantation
+				// Climatic niches, modulated by a slow noise field per species so
+				// neighbouring stands of similar climate still differ in mix.
+				drift :: proc(n: ^Noise, x, y: f64, k: f64) -> f64 {
+					return clamp(0.75 + 0.75 * fbm(n, x * 1.7 + k, y * 1.7 - k, 3), 0.05, 1.7)
+				}
+				comp[0] = niche(temp, -6, 12) * niche(precip, 500, 2600) * drift(&soil_noise, x, y, 3.0)
+				comp[1] = niche(temp, -12, 2) * niche(precip, 250, 900) * drift(&soil_noise, x, y, 17.0)
+				comp[2] = niche(temp, 12, 27) * niche(precip, 1200, 4000) * drift(&soil_noise, x, y, 31.0)
+				comp[3] = niche(temp, 5, 18) * niche(precip, 600, 1800) * drift(&soil_noise, x, y, 47.0)
+				comp[4] = niche(temp, 13, 26) * niche(precip, 200, 750) * drift(&soil_noise, x, y, 59.0)
+				comp[5] = niche(temp, 12, 22) * niche(precip, 1800, 5000) * 0.6
+				comp[6] = elev < 6 ? niche(temp, 20, 30) * 0.8 : 0.0
+				// Plantation is a land-use decision, not a climate niche: it
+				// appears on gentle, well-soiled, reachable ground.
+				comp[7] = (slope < 12 && soil_d > 0.8) ? 0.06 * drift(&soil_noise, x, y, 71.0) : 0.003
 				total := 0.0
 				for c in comp {total += c}
 				if total < 1e-6 {
@@ -415,18 +431,29 @@ growing_degree_days :: proc "contextless" (mean, amplitude, base: f64) -> f64 {
 	return (DAYS * amplitude / math.PI) * (c * t0 + math.sin(t0))
 }
 
-// A tolerance curve: 1 in the middle of [lo, hi], falling to 0 at the edges.
+// A tolerance curve over [lo, hi]: zero outside, one across the middle half,
+// ramping linearly over the outer quarters.
+//
+// A trapezoid rather than a bell, so that a species scoring well on two
+// tolerances keeps a score near one. Multiplying bells drives every score
+// towards zero and lets any flat term dominate the mix.
 @(private)
 niche :: proc "contextless" (x, lo, hi: f64) -> f64 {
 	if hi <= lo {
 		return 0
 	}
+	RAMP :: 0.25
 	t := (x - lo) / (hi - lo)
 	if t <= 0 || t >= 1 {
 		return 0
 	}
-	s := math.sin(t * math.PI)
-	return s * s
+	if t < RAMP {
+		return t / RAMP
+	}
+	if t > 1.0 - RAMP {
+		return (1.0 - t) / RAMP
+	}
+	return 1
 }
 
 // Local relief: the elevation range across a cell's neighbourhood.

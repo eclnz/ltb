@@ -21,6 +21,10 @@ run_interactive :: proc(a: ^app.App) {
 	cam: render.Camera
 	render.camera_init(&cam, &a.world, a.opts.width, a.opts.height)
 
+	rend: render.Renderer
+	render.renderer_init(&rend)
+	defer render.renderer_destroy(&rend)
+
 	available := app.populated_layers(&a.world)
 	defer delete(available)
 	if len(available) == 0 {
@@ -81,7 +85,9 @@ run_interactive :: proc(a: ^app.App) {
 		if rl.IsKeyPressed(.N) {
 			sim.step(&a.sim)
 			sim.flush_pyramid(&a.sim)
+			render.renderer_invalidate(&rend, view.layer)
 		}
+		if rl.IsKeyPressed(.R) {view.auto_range = !view.auto_range}
 		auto_level, _ := render.camera_visible(&cam, &a.world)
 		if rl.IsKeyPressed(.COMMA) {
 			base := view.force_level < 0 ? auto_level : view.force_level
@@ -99,13 +105,14 @@ run_interactive :: proc(a: ^app.App) {
 				sim.step(&a.sim)
 				tick_accum -= 1.0
 			}
+			render.renderer_invalidate(&rend, view.layer)
 		}
 
 		// ---- draw ----
 		rl.BeginDrawing()
 		rl.ClearBackground(view.background)
 
-		stats := render.draw_layer(&a.world, &cam, view)
+		stats := render.draw_layer(&rend, &a.world, &cam, view)
 
 		mp := rl.GetMousePosition()
 		hovered := render.camera_pick(&cam, &a.world, {f64(mp.x), f64(mp.y)}, stats.level)
@@ -172,7 +179,7 @@ draw_hud :: proc(
 	// Legend, bottom left.
 	legend_h := i32(len(desc.categories) > 0 ? 30 + 17 * len(desc.categories) : 62)
 	rl.DrawRectangle(0, screen_h - legend_h - 46, 240, legend_h + 46, rl.Color{0, 0, 0, 150})
-	render.draw_legend(&a.world, view.layer, 10, screen_h - legend_h - 36)
+	render.draw_legend(&a.world, view.layer, 10, screen_h - legend_h - 36, stats.range_lo, stats.range_hi)
 	render.draw_scale_bar(cam, 10, screen_h - 22)
 
 	// Inspector, right.
@@ -182,7 +189,7 @@ draw_hud :: proc(
 	}
 
 	rl.DrawText(
-		"[ ] layer   g grid   h shade   f fill   i inspector   , . level   ` auto   space run   n step",
+		"[ ] layer   g grid   h shade   f fill   r range   i inspector   , . level   ` auto   space run   n step",
 		10,
 		screen_h - 40 - 0,
 		11,

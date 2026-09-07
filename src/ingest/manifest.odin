@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:time"
 import "core:strings"
 import geo "ltb:geo"
 import "ltb:layers"
@@ -58,6 +59,10 @@ Source_Report :: struct {
 	ok:            bool,
 	message:       string,
 	cells_written: int,
+	seconds:       f64,
+	// Time spent decoding the file, as opposed to resampling it. Zero when the
+	// file was already in the manifest's cache.
+	read_seconds:  f64,
 }
 
 Manifest_Report :: struct {
@@ -123,13 +128,28 @@ load_manifest :: proc(
 		return report, .Bad_Manifest
 	}
 
+	// One parsed copy per file. A manifest routinely draws several layers from
+	// the same source, and these files run to tens of megabytes.
+	cache := make(map[string]^Feature_Collection, 8, context.allocator)
+	defer {
+		for path, fc in cache {
+			features_destroy(fc)
+			free(fc, context.allocator)
+			delete(path, context.allocator)
+		}
+		delete(cache)
+	}
+
 	reports := make([dynamic]Source_Report, 0, len(list), allocator)
 	for item in list {
 		sobj, ok := item.(json.Object)
 		if !ok {
 			continue
 		}
-		append(&reports, load_source_entry(w, sobj, base, allocator))
+		start := time.now()
+		r := load_source_entry(w, sobj, base, &cache, allocator)
+		r.seconds = time.duration_seconds(time.since(start))
+		append(&reports, r)
 	}
 	report.sources = reports[:]
 	for s in report.sources {
@@ -158,6 +178,7 @@ load_source_entry :: proc(
 	w: ^world.World,
 	obj: json.Object,
 	base: string,
+	cache: ^map[string]^Feature_Collection,
 	allocator := context.allocator,
 ) -> (
 	rep: Source_Report,
@@ -197,7 +218,7 @@ load_source_entry :: proc(
 	case "raster":
 		rep = load_raster_entry(w, obj, full, id, level, rep, allocator)
 	case "vector":
-		rep = load_vector_entry(w, obj, full, id, level, rep, allocator)
+		rep = load_vector_entry(w, obj, full, id, level, rep, cache, allocator)
 	case:
 		rep.message = fmt.aprintf("cannot tell what kind of file %q is; set \"kind\"", rel, allocator = allocator)
 	}
@@ -310,6 +331,7 @@ load_vector_entry :: proc(
 	id: layers.Layer_Id,
 	level: int,
 	rep_in: Source_Report,
+	cache: ^map[string]^Feature_Collection,
 	allocator := context.allocator,
 ) -> (
 	rep: Source_Report,
@@ -322,12 +344,21 @@ load_vector_entry :: proc(
 		}
 	}
 
-	fc, err := read_geojson(path, crs, context.allocator)
-	if err != .None {
-		rep.message = fmt.aprintf("%v", err, allocator = allocator)
-		return
+	fc: ^Feature_Collection
+	if cached, hit := cache[path]; hit {
+		fc = cached
+	} else {
+		read_start := time.now()
+		parsed, err := read_geojson(path, crs, context.allocator)
+		rep.read_seconds = time.duration_seconds(time.since(read_start))
+		if err != .None {
+			rep.message = fmt.aprintf("%v", err, allocator = allocator)
+			return
+		}
+		fc = new(Feature_Collection, context.allocator)
+		fc^ = parsed
+		cache[strings.clone(path, context.allocator)] = fc
 	}
-	defer features_destroy(&fc)
 
 	opts := Vector_Options {
 		level              = level,
@@ -344,21 +375,23 @@ load_vector_entry :: proc(
 	opts.filter = filter_from_json(obj, allocator)
 	defer delete(opts.filter, allocator)
 
-	res, verr := vectorize(w, &fc, id, opts)
+	res, verr := vectorize(w, fc, id, opts)
 	if verr != .None {
 		rep.message = fmt.aprintf("%v", verr, allocator = allocator)
 		return
 	}
 
-	points, lines, polys := feature_count_by_kind(&fc)
+	points, lines, polys := feature_count_by_kind(fc)
 	rep.ok = true
 	rep.cells_written = res.cells_written
 	rep.message = fmt.aprintf(
-		"%d point / %d line / %d polygon features, %d used -> %d cells",
+		"%d point / %d line / %d polygon, %d used / %d filtered / %d outside -> %d cells",
 		points,
 		lines,
 		polys,
 		res.features_used,
+		res.features_skipped,
+		res.features_outside,
 		res.cells_written,
 		allocator = allocator,
 	)
@@ -416,6 +449,12 @@ named_class_table :: proc(name: string) -> []Class_Rule {
 		return OSM_HIGHWAY_SPEEDS[:]
 	case "osm_landcover":
 		return OSM_LANDCOVER_CLASSES[:]
+	case "ne_road":
+		return NE_ROAD_CLASSES[:]
+	case "ne_road_speed":
+		return NE_ROAD_SPEEDS[:]
+	case "ne_water":
+		return NE_WATER_CLASSES[:]
 	}
 	return nil
 }
