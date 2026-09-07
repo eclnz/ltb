@@ -199,18 +199,9 @@ raster_geo_bounds :: proc "contextless" (r: ^Raster) -> geo.Geo_Bounds {
 		affine_apply(r.transform, 0, f64(r.height)),
 		affine_apply(r.transform, f64(r.width), f64(r.height)),
 	}
-	b := geo.Geo_Bounds {
-		lat_min = 90,
-		lat_max = -90,
-		lon_min = 180,
-		lon_max = -180,
-	}
+	b := geo.geo_bounds_empty()
 	for c in corners {
-		ll := geo.inverse(r.projection, c)
-		b.lat_min = math.min(b.lat_min, ll.lat)
-		b.lat_max = math.max(b.lat_max, ll.lat)
-		b.lon_min = math.min(b.lon_min, ll.lon)
-		b.lon_max = math.max(b.lon_max, ll.lon)
+		geo.geo_bounds_add(&b, geo.inverse(r.projection, c))
 	}
 	return b
 }

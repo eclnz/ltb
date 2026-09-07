@@ -130,7 +130,7 @@ vectorize :: proc(
 	opts := Vector_Options{},
 ) -> (
 	res: Vector_Result,
-	err: Error,
+	err: Ingest_Error,
 ) {
 	d := layers.desc_of(w.registry, layer)
 	if d == nil {

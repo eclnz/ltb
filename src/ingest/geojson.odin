@@ -17,21 +17,13 @@ in that order. Files in the wild sometimes carry a "crs" member from the older
 2008 draft; `crs_override` is there for those.
 */
 
-Geojson_Error :: enum {
-	None,
-	File_Not_Found,
-	Bad_Json,
-	Not_A_Feature_Collection,
-	Unsupported_Geometry,
-}
-
 read_geojson :: proc(
 	path: string,
 	crs_override: Maybe(geo.Projection) = nil,
 	allocator := context.allocator,
 ) -> (
 	fc: Feature_Collection,
-	err: Geojson_Error,
+	err: Ingest_Error,
 ) {
 	src, ferr := os.read_entire_file(path, context.allocator)
 	if ferr != nil {
@@ -51,7 +43,7 @@ parse_geojson :: proc(
 	allocator := context.allocator,
 ) -> (
 	fc: Feature_Collection,
-	err: Geojson_Error,
+	err: Ingest_Error,
 ) {
 	root, jerr := json.parse_string(text, json.DEFAULT_SPECIFICATION, false, context.allocator)
 	if jerr != nil {

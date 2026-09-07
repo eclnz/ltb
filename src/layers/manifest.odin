@@ -268,26 +268,38 @@ semantic_from_name :: proc(s: string) -> Semantic {
 	return .Scalar
 }
 
-aggregate_from_name :: proc(s: string) -> Aggregate {
+// The aggregate a name denotes. `ok` is false for a name no rule answers to, so
+// that a caller reading a hand-written manifest can reject a typo instead of
+// silently combining cells by a rule nobody asked for.
+aggregate_lookup :: proc(s: string) -> (agg: Aggregate, ok: bool) {
 	switch strings.to_lower(s, context.temp_allocator) {
+	case "mean", "average":
+		return .Mean, true
 	case "sum":
-		return .Sum
+		return .Sum, true
 	case "min", "minimum":
-		return .Min
+		return .Min, true
 	case "max", "maximum":
-		return .Max
+		return .Max, true
 	case "majority", "mode":
-		return .Majority
+		return .Majority, true
 	case "composition", "composition_mean":
-		return .Composition_Mean
+		return .Composition_Mean, true
 	case "circular", "circular_mean":
-		return .Circular_Mean
+		return .Circular_Mean, true
 	case "any", "or":
-		return .Any
+		return .Any, true
 	case "none":
-		return .None
+		return .None, true
 	}
-	return .Mean
+	return .Mean, false
+}
+
+// The lenient form, for a layer declaration where an unreadable rule is not
+// worth refusing the whole catalogue over.
+aggregate_from_name :: proc(s: string) -> Aggregate {
+	agg, _ := aggregate_lookup(s)
+	return agg
 }
 
 palette_by_name :: proc(s: string, semantic: Semantic) -> Palette {

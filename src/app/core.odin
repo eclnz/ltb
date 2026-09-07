@@ -168,26 +168,32 @@ load_source :: proc(w: ^world.World, path, layer_name: string) {
 		return
 	}
 
-	if strings.has_suffix(path, ".geojson") || strings.has_suffix(path, ".json") {
-		load_vector_source(w, path, id, layer_name)
+	// Which reader opens this file is the reader tables' business, not this
+	// function's. A format added there is loadable here without a change.
+	if vector, is_vector := ingest.vector_reader_for(path); is_vector {
+		load_vector_source(w, vector, path, id, layer_name)
+		return
+	}
+	reader, is_raster := ingest.raster_reader_for(path)
+	if !is_raster {
+		fmt.eprintfln("nothing here reads %s", path)
 		return
 	}
 
-	raster: ingest.Raster
-	if strings.has_suffix(path, ".asc") || strings.has_suffix(path, ".grd") {
-		r, err := ingest.read_esri_ascii(path, geo.proj_geographic())
-		if err != .None {
-			fmt.eprintfln("could not read %s: %v", path, err)
-			return
-		}
-		raster = r
-	} else {
-		r, err := ingest.read_geotiff(path)
-		if err != .None {
-			fmt.eprintfln("could not read %s: %v", path, err)
-			return
-		}
-		raster = r
+	raster, err := reader.read(path, nil, context.allocator)
+	if err == .Crs_Required {
+		// Dropping a file on the window carries no CRS with it, and this format
+		// has none of its own. Guessing would put the data in the wrong place
+		// silently, so say what is missing and where to put it.
+		fmt.eprintfln(
+			"%s carries no coordinate system; load it from a manifest with an \"epsg\" entry",
+			path,
+		)
+		return
+	}
+	if err != .None {
+		fmt.eprintfln("could not read %s: %v", path, err)
+		return
 	}
 	defer ingest.raster_destroy(&raster)
 
@@ -206,9 +212,9 @@ load_source :: proc(w: ^world.World, path, layer_name: string) {
 		b.lon_max,
 	)
 
-	res, err := ingest.rasterize(w, &raster, id, ingest.Options{level = 0, fill_gaps = true})
-	if err != .None {
-		fmt.eprintfln("could not resample %s: %v", path, err)
+	res, rerr := ingest.rasterize(w, &raster, id, ingest.Raster_Options{level = 0, fill_gaps = true})
+	if rerr != .None {
+		fmt.eprintfln("could not resample %s: %v", path, rerr)
 		return
 	}
 	fmt.printfln(
@@ -238,8 +244,14 @@ load_source :: proc(w: ^world.World, path, layer_name: string) {
 // Loads a single vector file with defaults chosen from the layer's semantic:
 // a categorical layer takes the feature's value, a fraction takes coverage,
 // and anything else counts density. A manifest gives finer control.
-load_vector_source :: proc(w: ^world.World, path: string, id: layers.Layer_Id, layer_name: string) {
-	fc, err := ingest.read_geojson(path)
+load_vector_source :: proc(
+	w: ^world.World,
+	reader: ingest.Vector_Reader,
+	path: string,
+	id: layers.Layer_Id,
+	layer_name: string,
+) {
+	fc, err := reader.read(path, nil, context.allocator)
 	if err != .None {
 		fmt.eprintfln("could not read %s: %v", path, err)
 		return

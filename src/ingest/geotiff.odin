@@ -49,17 +49,6 @@ CT_MERCATOR :: 7
 CT_LAMBERT_AZIM_EQUAL_AREA :: 10
 CT_ALBERS_EQUAL_AREA :: 11
 
-Geotiff_Error :: enum {
-	None,
-	File_Not_Found,
-	Not_Tiff,
-	Unsupported_Layout,
-	Unsupported_Sample,
-	Decompression_Failed,
-	No_Georeferencing,
-	Unknown_Crs,
-}
-
 // Reads a GeoTIFF from disk.
 //
 // `crs_override` replaces whatever the file claims; pass it for files whose
@@ -70,7 +59,7 @@ read_geotiff :: proc(
 	allocator := context.allocator,
 ) -> (
 	r: Raster,
-	err: Geotiff_Error,
+	err: Ingest_Error,
 ) {
 	src, ferr := os.read_entire_file(path, context.allocator)
 	if ferr != nil {
@@ -86,7 +75,7 @@ parse_geotiff :: proc(
 	allocator := context.allocator,
 ) -> (
 	r: Raster,
-	err: Geotiff_Error,
+	err: Ingest_Error,
 ) {
 	t, ok := tiff.open(file, context.temp_allocator)
 	if !ok {
@@ -401,7 +390,7 @@ key_double :: proc(k: ^Geo_Keys, id: u16, default: f64 = 0) -> f64 {
 // EPSG codes are matched for the families that cover most published data, and a
 // user-defined projection is rebuilt from its GeoTIFF parameters. Anything else
 // returns .Unknown_Crs; pass `crs_override` to place the raster by hand.
-geotiff_projection :: proc(t: ^tiff.Reader) -> (geo.Projection, Geotiff_Error) {
+geotiff_projection :: proc(t: ^tiff.Reader) -> (geo.Projection, Ingest_Error) {
 	keys, ok := read_geo_keys(t, context.temp_allocator)
 	if !ok {
 		// No GeoTIFF keys at all. A plain TIFF with a tiepoint is almost always

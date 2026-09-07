@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "ltb:app"
+import "ltb:ingest"
 import "ltb:layers"
 import "ltb:ui"
 import rl "vendor:raylib"
@@ -44,9 +45,6 @@ Browser :: struct {
 	open_btn:    rl.Rectangle,
 	cancel_btn:  rl.Rectangle,
 }
-
-@(private = "file")
-READABLE := [?]string{".json", ".geojson", ".tif", ".tiff", ".asc", ".grd"}
 
 browser_init :: proc(b: ^Browser) {
 	b.names = make([dynamic]string, 0, 64)
@@ -155,7 +153,7 @@ browser_set_dir :: proc(b: ^Browser, a: ^app.App, dir: string) {
 			continue
 		}
 		is_dir := !rl.IsPathFile(files.paths[i])
-		if !is_dir && !browser_readable(name) {
+		if !is_dir && !ingest.is_readable(name) {
 			continue
 		}
 		append(&rows, Row{name, path, is_dir})
@@ -173,17 +171,6 @@ browser_set_dir :: proc(b: ^Browser, a: ^app.App, dir: string) {
 		append(&b.paths, strings.clone(r.path))
 		append(&b.is_dir, r.is_dir)
 	}
-}
-
-@(private = "file")
-browser_readable :: proc(name: string) -> bool {
-	lower := strings.to_lower(name, context.temp_allocator)
-	for ext in READABLE {
-		if strings.has_suffix(lower, ext) {
-			return true
-		}
-	}
-	return false
 }
 
 @(private = "file")

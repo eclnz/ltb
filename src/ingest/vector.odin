@@ -199,18 +199,9 @@ feature_matches :: proc(f: Feature, clauses: []Filter_Clause) -> bool {
 // ---------------------------------------------------------------------------
 
 features_geo_bounds :: proc(fc: ^Feature_Collection) -> geo.Geo_Bounds {
-	b := geo.Geo_Bounds {
-		lat_min = 90,
-		lat_max = -90,
-		lon_min = 180,
-		lon_max = -180,
-	}
+	b := geo.geo_bounds_empty()
 	for p in fc.points {
-		ll := geo.inverse(fc.projection, geo.Point{p.x, p.y})
-		b.lat_min = math.min(b.lat_min, ll.lat)
-		b.lat_max = math.max(b.lat_max, ll.lat)
-		b.lon_min = math.min(b.lon_min, ll.lon)
-		b.lon_max = math.max(b.lon_max, ll.lon)
+		geo.geo_bounds_add(&b, geo.inverse(fc.projection, geo.Point{p.x, p.y}))
 	}
 	return b
 }

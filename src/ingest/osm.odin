@@ -1,18 +1,16 @@
 package ingest
 
-import "ltb:layers"
-import "ltb:world"
-
 /*
 Ready-made vocabularies for OpenStreetMap tags.
 
 OSM is where road networks, building footprints and land use come from for most
 of the world, and its tags are strings. These tables turn the common ones into
 the numbers the standard catalogue's categorical layers expect, so getting a
-road network in is a call rather than a research project.
+road network in is a manifest entry rather than a research project.
 
-They are ordinary data. A world using a national dataset with its own coding
-declares its own tables the same way.
+They are ordinary data, listed in `CLASS_TABLES` so a manifest can name one. A
+world using a national dataset with its own coding adds a row there, or spells
+its table out inline with "classes".
 */
 
 // `highway` values mapped onto `human.road_class`:
@@ -103,117 +101,6 @@ OSM_LANDCOVER_CLASSES := [?]Class_Rule {
 	{"quarry", 16},
 	{"military", 14},
 	{"pasture", 18},
-}
-
-// Convenience wrappers. Each is a few lines; they exist so the common case
-// reads as one call, and to document which `Measure` suits which feature type.
-
-// Highest road class touching each cell. Class is a label, so it takes the
-// maximum rather than an average: a cell with a motorway and a driveway is a
-// motorway cell.
-ingest_osm_road_class :: proc(
-	w: ^world.World,
-	fc: ^Feature_Collection,
-	layer: layers.Layer_Id,
-	level := 0,
-) -> (
-	Vector_Result,
-	Error,
-) {
-	return vectorize(
-		w,
-		fc,
-		layer,
-		Vector_Options {
-			level = level,
-			measure = .Value,
-			rule = .Max,
-			value = classified_field("highway", OSM_HIGHWAY_CLASSES[:]),
-		},
-	)
-}
-
-// Kilometres of road per square kilometre. The layer's own scale converts the
-// accumulated metres, so pass a layer declared in km/km2.
-ingest_osm_road_density :: proc(
-	w: ^world.World,
-	fc: ^Feature_Collection,
-	layer: layers.Layer_Id,
-	level := 0,
-) -> (
-	Vector_Result,
-	Error,
-) {
-	return vectorize(
-		w,
-		fc,
-		layer,
-		Vector_Options {
-			level = level,
-			measure = .Density,
-			rule = .Sum,
-			value = constant_value(1),
-			// metres accumulated per km2; the layer wants km/km2
-			filter = nil,
-		},
-	)
-}
-
-// Fraction of each cell under building footprints.
-ingest_osm_built_up :: proc(
-	w: ^world.World,
-	fc: ^Feature_Collection,
-	layer: layers.Layer_Id,
-	level := 0,
-) -> (
-	Vector_Result,
-	Error,
-) {
-	return vectorize(
-		w,
-		fc,
-		layer,
-		Vector_Options {
-			level = level,
-			measure = .Coverage,
-			rule = .Sum,
-			value = constant_value(1),
-			coverage_samples = 19,
-		},
-	)
-}
-
-// Land cover from `landuse`, falling back to `natural` where the first is
-// absent. Two passes, because a feature can carry either tag.
-ingest_osm_landcover :: proc(
-	w: ^world.World,
-	fc: ^Feature_Collection,
-	layer: layers.Layer_Id,
-	level := 0,
-) -> (
-	res: Vector_Result,
-	err: Error,
-) {
-	for field in ([2]string{"natural", "landuse"}) {
-		r, e := vectorize(
-			w,
-			fc,
-			layer,
-			Vector_Options {
-				level = level,
-				measure = .Value,
-				rule = .Majority,
-				value = classified_field(field, OSM_LANDCOVER_CLASSES[:]),
-			},
-		)
-		if e != .None {
-			return res, e
-		}
-		res.cells_written += r.cells_written
-		res.features_used += r.features_used
-		res.features_skipped += r.features_skipped
-	}
-	return res, .None
 }
 
 // Carriageway width in metres by `highway` value.

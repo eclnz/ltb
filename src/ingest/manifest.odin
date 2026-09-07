@@ -198,7 +198,7 @@ load_source_entry :: proc(
 	}
 	id, found := layers.lookup(w.registry, layer_name)
 	if !found {
-		rep.message = fmt.aprintf("no layer named %q", layer_name, allocator = allocator)
+		report_unknown(&rep, "layer", layer_name, allocator)
 		return
 	}
 
@@ -216,31 +216,82 @@ load_source_entry :: proc(
 	}
 
 	level := int(layers.json_number(obj, "level", 0))
-	kind := layers.json_string(obj, "kind", format_from_extension(full))
 
-	switch kind {
+	// "kind" forces the branch; without it the reader tables decide, so a format
+	// added there needs no change here.
+	switch layers.json_string(obj, "kind") {
 	case "raster":
-		rep = load_raster_entry(w, obj, full, id, level, rep, allocator)
+		return load_raster_entry(w, obj, full, id, level, rep, allocator)
 	case "vector":
-		rep = load_vector_entry(w, obj, full, id, level, rep, cache, allocator)
+		return load_vector_entry(w, obj, full, id, level, rep, cache, allocator)
+	case "":
+		if _, is_raster := raster_reader_for(full); is_raster {
+			return load_raster_entry(w, obj, full, id, level, rep, allocator)
+		}
+		if _, is_vector := vector_reader_for(full); is_vector {
+			return load_vector_entry(w, obj, full, id, level, rep, cache, allocator)
+		}
+		report_error(&rep, .Unknown_Format, allocator)
 	case:
-		rep.message = fmt.aprintf("cannot tell what kind of file %q is; set \"kind\"", rel, allocator = allocator)
+		report_unknown(&rep, "kind", layers.json_string(obj, "kind"), allocator)
 	}
 	return
 }
 
+// ---------------------------------------------------------------------------
+// Reporting a failure
+//
+// Every failed source ends the same way: `ok` stays false and `message` says
+// why. These are the two shapes that takes.
+// ---------------------------------------------------------------------------
+
 @(private)
-format_from_extension :: proc(path: string) -> string {
-	lower := strings.to_lower(path, context.temp_allocator)
-	switch {
-	case strings.has_suffix(lower, ".tif"), strings.has_suffix(lower, ".tiff"):
-		return "raster"
-	case strings.has_suffix(lower, ".asc"), strings.has_suffix(lower, ".grd"):
-		return "raster"
-	case strings.has_suffix(lower, ".geojson"), strings.has_suffix(lower, ".json"):
-		return "vector"
+report_error :: proc(rep: ^Source_Report, err: Ingest_Error, allocator := context.allocator) {
+	rep.ok = false
+	rep.message = fmt.aprintf("%v", err, allocator = allocator)
+}
+
+// For a manifest that named something this build does not have. The name is
+// quoted back, because a typo is the usual cause and seeing it is the fix.
+@(private)
+report_unknown :: proc(rep: ^Source_Report, what, name: string, allocator := context.allocator) {
+	rep.ok = false
+	rep.message = fmt.aprintf("no %s called %q", what, name, allocator = allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+// The CRS a source declares with "epsg", if any.
+@(private)
+crs_from_json :: proc(obj: json.Object) -> (crs: Maybe(geo.Projection), epsg: int, ok: bool) {
+	epsg = int(layers.json_number(obj, "epsg", 0))
+	if epsg <= 0 {
+		return nil, 0, true
 	}
-	return ""
+	p, known := projection_for_epsg(epsg)
+	if !known {
+		return nil, epsg, false
+	}
+	return p, epsg, true
+}
+
+// An enum named in the manifest. Returns the name as well, so a caller can
+// quote it back when it is not one this build knows.
+@(private)
+named_option :: proc(
+	obj: json.Object,
+	key, default: string,
+	table: []Named($E),
+) -> (
+	value: E,
+	name: string,
+	ok: bool,
+) {
+	name = layers.json_string(obj, key, default)
+	value, ok = enum_from_name(name, table)
+	return
 }
 
 @(private)
@@ -256,39 +307,40 @@ load_raster_entry :: proc(
 	rep: Source_Report,
 ) {
 	rep = rep_in
-	crs: Maybe(geo.Projection)
-	if epsg := int(layers.json_number(obj, "epsg", 0)); epsg > 0 {
-		if p, ok := projection_for_epsg(epsg); ok {
-			crs = p
-		} else {
-			rep.message = fmt.aprintf("EPSG:%d is not one this build knows", epsg, allocator = allocator)
-			return
-		}
+	crs, epsg, crs_ok := crs_from_json(obj)
+	if !crs_ok {
+		rep.message = fmt.aprintf("EPSG:%d is not one this build knows", epsg, allocator = allocator)
+		return
 	}
 
-	raster: Raster
-	lower := strings.to_lower(path, context.temp_allocator)
-	if strings.has_suffix(lower, ".asc") || strings.has_suffix(lower, ".grd") {
-		r, err := read_esri_ascii(path, crs.? or_else geo.proj_geographic())
-		if err != .None {
-			rep.message = fmt.aprintf("%v", err, allocator = allocator)
-			return
-		}
-		raster = r
-	} else {
-		r, err := read_geotiff(path, crs)
-		if err != .None {
-			rep.message = fmt.aprintf("%v", err, allocator = allocator)
-			return
-		}
-		raster = r
+	resample, resample_name, resample_ok := named_option(obj, "resample", "auto", RESAMPLE_NAMES[:])
+	if !resample_ok {
+		report_unknown(&rep, "resample", resample_name, allocator)
+		return
+	}
+	rule_name := layers.json_string(obj, "rule", "none")
+	rule, rule_ok := layers.aggregate_lookup(rule_name)
+	if !rule_ok {
+		report_unknown(&rep, "rule", rule_name, allocator)
+		return
+	}
+
+	reader, have_reader := raster_reader_for(path)
+	if !have_reader {
+		report_error(&rep, .Unknown_Format, allocator)
+		return
+	}
+	raster, err := reader.read(path, crs, context.allocator)
+	if err != .None {
+		report_error(&rep, err, allocator)
+		return
 	}
 	defer raster_destroy(&raster)
 
-	opts := Options {
+	opts := Raster_Options {
 		level        = level,
-		resample     = resample_from_name(layers.json_string(obj, "resample", "auto")),
-		rule         = layers.aggregate_from_name(layers.json_string(obj, "rule", "none")),
+		resample     = resample,
+		rule         = rule,
 		value_scale  = layers.json_number(obj, "scale", 1),
 		value_offset = layers.json_number(obj, "offset", 0),
 		fill_gaps    = layers.json_bool(obj, "fill_gaps", true),
@@ -307,15 +359,16 @@ load_raster_entry :: proc(
 		}
 	}
 
-	res, err := rasterize(w, &raster, id, opts)
-	if err != .None {
-		rep.message = fmt.aprintf("%v", err, allocator = allocator)
+	res, rerr := rasterize(w, &raster, id, opts)
+	if rerr != .None {
+		report_error(&rep, rerr, allocator)
 		return
 	}
 	rep.ok = true
 	rep.cells_written = res.cells_written
 	rep.message = fmt.aprintf(
-		"%dx%d %v, ~%.0f m/px, %v -> %d cells",
+		"%s %dx%d %v, ~%.0f m/px, %v -> %d cells",
+		reader.name,
 		raster.width,
 		raster.height,
 		raster.kind,
@@ -341,22 +394,53 @@ load_vector_entry :: proc(
 	rep: Source_Report,
 ) {
 	rep = rep_in
-	crs: Maybe(geo.Projection)
-	if epsg := int(layers.json_number(obj, "epsg", 0)); epsg > 0 {
-		if p, ok := projection_for_epsg(epsg); ok {
-			crs = p
+	crs, epsg, crs_ok := crs_from_json(obj)
+	if !crs_ok {
+		rep.message = fmt.aprintf("EPSG:%d is not one this build knows", epsg, allocator = allocator)
+		return
+	}
+
+	measure, measure_name, measure_ok := named_option(obj, "measure", "value", MEASURE_NAMES[:])
+	if !measure_ok {
+		report_unknown(&rep, "measure", measure_name, allocator)
+		return
+	}
+	// An unset rule lets the measure or the layer decide; a named one must exist.
+	rule := layers.Aggregate.None
+	if rule_name := layers.json_string(obj, "rule"); len(rule_name) > 0 {
+		known: bool
+		rule, known = layers.aggregate_lookup(rule_name)
+		if !known {
+			report_unknown(&rep, "rule", rule_name, allocator)
+			return
 		}
+	}
+
+	value, value_bad, value_ok := value_source_at(obj, "value", 1, allocator)
+	if !value_ok {
+		report_unknown(&rep, "class table", value_bad, allocator)
+		return
+	}
+	width, width_bad, width_ok := value_source_at(obj, "width_m", 0, allocator)
+	if !width_ok {
+		report_unknown(&rep, "class table", width_bad, allocator)
+		return
 	}
 
 	fc: ^Feature_Collection
 	if cached, hit := cache[path]; hit {
 		fc = cached
 	} else {
+		reader, have_reader := vector_reader_for(path)
+		if !have_reader {
+			report_error(&rep, .Unknown_Format, allocator)
+			return
+		}
 		read_start := time.now()
-		parsed, err := read_geojson(path, crs, context.allocator)
+		parsed, err := reader.read(path, crs, context.allocator)
 		rep.read_seconds = time.duration_seconds(time.since(read_start))
 		if err != .None {
-			rep.message = fmt.aprintf("%v", err, allocator = allocator)
+			report_error(&rep, err, allocator)
 			return
 		}
 		fc = new(Feature_Collection, context.allocator)
@@ -366,23 +450,20 @@ load_vector_entry :: proc(
 
 	opts := Vector_Options {
 		level              = level,
-		measure            = measure_from_name(layers.json_string(obj, "measure", "value")),
-		rule               = layers.aggregate_from_name(layers.json_string(obj, "rule", "none")),
+		measure            = measure,
+		rule               = rule,
+		value              = value,
+		width              = width,
 		coverage_samples   = int(layers.json_number(obj, "coverage_samples", 7)),
 		line_step_fraction = layers.json_number(obj, "line_step", 0.25),
 		unit_scale         = layers.json_number(obj, "unit_scale", 1),
 	}
-	opts.width = width_source_from_json(obj, allocator)
-	if layers.json_string(obj, "rule") == "" {
-		opts.rule = .None // let the measure or the layer decide
-	}
-	opts.value = value_source_from_json(obj, allocator)
 	opts.filter = filter_from_json(obj, allocator)
 	defer delete(opts.filter, allocator)
 
 	res, verr := vectorize(w, fc, id, opts)
 	if verr != .None {
-		rep.message = fmt.aprintf("%v", verr, allocator = allocator)
+		report_error(&rep, verr, allocator)
 		return
 	}
 
@@ -404,89 +485,79 @@ load_vector_entry :: proc(
 	return
 }
 
+// ---------------------------------------------------------------------------
+// Value sources
+// ---------------------------------------------------------------------------
+
+/*
+The value source at `key`, which may be a bare number or an object:
+
+	"value": 1
+	"value": { "field": "lanes", "scale": 3.5 }
+	"value": { "classify": "highway", "table": "osm_highway" }
+
+`ok` is false only when a named class table does not exist, in which case
+`bad_name` is the name that was asked for. An absent key is not an error: it
+means `default_constant`, which is what "width_m": 0 -- centrelines only -- and
+"value": 1 -- count each feature once -- are.
+*/
 @(private)
-value_source_from_json :: proc(obj: json.Object, allocator := context.allocator) -> Value_Source {
-	v, has := obj["value"]
+value_source_at :: proc(
+	obj: json.Object,
+	key: string,
+	default_constant: f64,
+	allocator := context.allocator,
+) -> (
+	src: Value_Source,
+	bad_name: string,
+	ok: bool,
+) {
+	v, has := obj[key]
 	if !has {
-		return constant_value(1)
+		return constant_value(default_constant), "", true
+	}
+	if n, is_num := layers.json_value_number(v); is_num {
+		return constant_value(n), "", true
 	}
 	vo, is_obj := v.(json.Object)
 	if !is_obj {
-		if n, is_num := layers.json_value_number(v); is_num {
-			return constant_value(n)
-		}
-		return constant_value(1)
+		return constant_value(default_constant), "", true
 	}
-	return value_source_from_object(vo, allocator)
-}
 
-@(private)
-value_source_from_object :: proc(vo: json.Object, allocator := context.allocator) -> Value_Source {
 	if _, has_const := vo["constant"]; has_const {
-		return constant_value(layers.json_number(vo, "constant", 1))
+		return constant_value(layers.json_number(vo, "constant", default_constant)), "", true
 	}
 	if field := layers.json_string(vo, "field"); len(field) > 0 {
 		return number_field(
-			field,
-			layers.json_number(vo, "scale", 1),
-			layers.json_number(vo, "offset", 0),
-			layers.json_number(vo, "fallback", 0),
-		)
+				field,
+				layers.json_number(vo, "scale", 1),
+				layers.json_number(vo, "offset", 0),
+				layers.json_number(vo, "fallback", 0),
+			),
+			"",
+			true
 	}
 	if field := layers.json_string(vo, "classify"); len(field) > 0 {
-		classes := named_class_table(layers.json_string(vo, "table"))
-		if classes == nil {
+		classes: []Class_Rule
+		if name := layers.json_string(vo, "table"); len(name) > 0 {
+			known: bool
+			classes, known = class_table_for(name)
+			if !known {
+				return {}, name, false
+			}
+		} else {
 			classes = class_table_from_json(vo, allocator)
 		}
 		return classified_field(
-			field,
-			classes,
-			layers.json_number(vo, "fallback", 0),
-			layers.json_bool(vo, "skip_unclassified", true),
-		)
+				field,
+				classes,
+				layers.json_number(vo, "fallback", 0),
+				layers.json_bool(vo, "skip_unclassified", true),
+			),
+			"",
+			true
 	}
-	return constant_value(1)
-}
-
-// "width_m": 30, or "width_m": { "classify": "type", "table": "ne_road_width" }
-@(private)
-width_source_from_json :: proc(obj: json.Object, allocator := context.allocator) -> Value_Source {
-	v, has := obj["width_m"]
-	if !has {
-		return constant_value(0)
-	}
-	if n, is_num := layers.json_value_number(v); is_num {
-		return constant_value(n)
-	}
-	if vo, is_obj := v.(json.Object); is_obj {
-		return value_source_from_object(vo, allocator)
-	}
-	return constant_value(0)
-}
-
-@(private)
-named_class_table :: proc(name: string) -> []Class_Rule {
-	switch name {
-	case "osm_highway":
-		return OSM_HIGHWAY_CLASSES[:]
-	case "osm_railway":
-		return OSM_RAILWAY_CLASSES[:]
-	case "osm_highway_speed":
-		return OSM_HIGHWAY_SPEEDS[:]
-	case "osm_landcover":
-		return OSM_LANDCOVER_CLASSES[:]
-	case "ne_road":
-		return NE_ROAD_CLASSES[:]
-	case "ne_road_speed":
-		return NE_ROAD_SPEEDS[:]
-	case "ne_water":
-		return NE_WATER_CLASSES[:]
-	case "ne_road_width":
-		return NE_ROAD_WIDTHS[:]
-	case "osm_highway_width":
-		return OSM_HIGHWAY_WIDTHS[:]
-	}
-	return nil
+	return constant_value(default_constant), "", true
 }
 
 // { "classify": "surface", "classes": { "asphalt": 1, "gravel": 0.6 } }
@@ -552,34 +623,6 @@ filter_from_json :: proc(obj: json.Object, allocator := context.allocator) -> []
 		append(&out, clause)
 	}
 	return out[:]
-}
-
-@(private)
-resample_from_name :: proc(s: string) -> Resample {
-	switch s {
-	case "scatter":
-		return .Scatter
-	case "nearest", "gather_nearest":
-		return .Gather_Nearest
-	case "linear", "gather_linear", "bilinear":
-		return .Gather_Linear
-	}
-	return .Auto
-}
-
-@(private)
-measure_from_name :: proc(s: string) -> Measure {
-	switch s {
-	case "presence", "any":
-		return .Presence
-	case "count":
-		return .Count
-	case "density":
-		return .Density
-	case "coverage", "fraction":
-		return .Coverage
-	}
-	return .Value
 }
 
 @(private)

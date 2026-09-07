@@ -20,7 +20,7 @@ Resample :: enum u8 {
 	Gather_Linear,
 }
 
-Options :: struct {
+Raster_Options :: struct {
 	// Pyramid level to write. Data normally lands at level 0 and the coarser
 	// levels are derived from it.
 	level:        int,
@@ -46,20 +46,12 @@ Options :: struct {
 
 DEFAULT_MAX_CELLS :: 40_000_000
 
-Result :: struct {
+Raster_Result :: struct {
 	cells_written:  int,
 	samples_used:   int,
 	samples_missing: int,
 	resample_used:  Resample,
 	gap_filled:     int,
-}
-
-Error :: enum {
-	None,
-	Unknown_Layer,
-	Too_Many_Cells,
-	Bad_Raster,
-	Component_Mismatch,
 }
 
 @(private)
@@ -75,10 +67,10 @@ rasterize :: proc(
 	w: ^world.World,
 	r: ^Raster,
 	layer: layers.Layer_Id,
-	opts := Options{},
+	opts := Raster_Options{},
 ) -> (
-	res: Result,
-	err: Error,
+	res: Raster_Result,
+	err: Ingest_Error,
 ) {
 	d := layers.desc_of(w.registry, layer)
 	if d == nil {
@@ -214,7 +206,7 @@ fill_gaps_from_raster :: proc(
 	layer: layers.Layer_Id,
 	d: ^layers.Layer_Desc,
 	bounds: hex.Bounds,
-	o: Options,
+	o: Raster_Options,
 	band_of: []int,
 	a: ^layers.Accumulator,
 ) -> (

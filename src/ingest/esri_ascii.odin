@@ -14,24 +14,26 @@ enormous, but it is what a great deal of public elevation, climate and forestry
 data is still published as, and it needs no dependencies to read.
 */
 
-Read_Error :: enum {
-	None,
-	File_Not_Found,
-	Bad_Header,
-	Truncated,
-	Unsupported,
-}
+/*
+Reads an ESRI ASCII grid.
 
-// Reads an ESRI ASCII grid. The file carries no CRS, so pass the projection the
-// coordinates are in; `geo.proj_geographic()` is right for a lat/lon grid.
+The format carries no CRS at all, so `crs` is required rather than optional: a
+grid published in a national projection read as degrees lands a continent away,
+and there is nothing in the file to notice it by. `.Crs_Required` says so
+instead of assuming lat/lon.
+*/
 read_esri_ascii :: proc(
 	path: string,
-	projection: geo.Projection,
+	crs: Maybe(geo.Projection) = nil,
 	allocator := context.allocator,
 ) -> (
 	r: Raster,
-	err: Read_Error,
+	err: Ingest_Error,
 ) {
+	projection, has_crs := crs.?
+	if !has_crs {
+		return {}, .Crs_Required
+	}
 	src, ferr := os.read_entire_file(path, context.temp_allocator)
 	if ferr != nil {
 		return {}, .File_Not_Found
@@ -47,7 +49,7 @@ parse_esri_ascii :: proc(
 	allocator := context.allocator,
 ) -> (
 	r: Raster,
-	err: Read_Error,
+	err: Ingest_Error,
 ) {
 	ncols, nrows := -1, -1
 	xll, yll := 0.0, 0.0
@@ -172,9 +174,4 @@ parse_esri_ascii :: proc(
 		return {}, .Bad_Header
 	}
 	return r, .None
-}
-
-@(private)
-element_kind_bytes :: proc "contextless" (k: layers.Element_Kind) -> int {
-	return layers.element_size(k)
 }

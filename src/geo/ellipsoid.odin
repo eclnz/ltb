@@ -36,6 +36,31 @@ geo_bounds_center :: proc "contextless" (b: Geo_Bounds) -> Lat_Lon {
 	return lat_lon((b.lat_min + b.lat_max) * 0.5, wrap_longitude(b.lon_min + lon_span * 0.5))
 }
 
+/*
+An empty box that grows to contain whatever is added to it:
+
+	b := geo.geo_bounds_empty()
+	for p in points { geo.geo_bounds_add(&b, p) }
+
+The edges start inverted, so the first point added replaces all four rather than
+being averaged with a meaningless zero. Ask `geo_bounds_is_empty` before using
+the result: nothing was added if it is still inverted.
+*/
+geo_bounds_empty :: proc "contextless" () -> Geo_Bounds {
+	return Geo_Bounds{lat_min = 90, lon_min = 180, lat_max = -90, lon_max = -180}
+}
+
+geo_bounds_add :: proc "contextless" (b: ^Geo_Bounds, p: Lat_Lon) {
+	b.lat_min = math.min(b.lat_min, p.lat)
+	b.lat_max = math.max(b.lat_max, p.lat)
+	b.lon_min = math.min(b.lon_min, p.lon)
+	b.lon_max = math.max(b.lon_max, p.lon)
+}
+
+geo_bounds_is_empty :: proc "contextless" (b: Geo_Bounds) -> bool {
+	return b.lat_min > b.lat_max || b.lon_min > b.lon_max
+}
+
 geo_bounds_contains :: proc "contextless" (b: Geo_Bounds, p: Lat_Lon) -> bool {
 	if p.lat < b.lat_min || p.lat > b.lat_max {
 		return false
