@@ -135,7 +135,7 @@ draw_layer :: proc(r: ^Renderer, w: ^world.World, cam: ^Camera, view: View) -> (
 
 	stats.range_lo = desc.min_value
 	stats.range_hi = desc.max_value
-	if view.auto_range && desc.semantic != .Composition && desc.semantic != .Categorical {
+	if view.auto_range && desc.semantic != .Composition && desc.semantic != .Categorical && desc.semantic != .Color {
 		vr := value_range(r, w, view.layer, level)
 		stats.range_lo, stats.range_hi = vr.lo, vr.hi
 	}
@@ -151,7 +151,8 @@ draw_layer :: proc(r: ^Renderer, w: ^world.World, cam: ^Camera, view: View) -> (
 			value: f64
 			ok: bool
 			draw_level := level
-			if desc.semantic == .Composition {
+			multi := desc.semantic == .Composition || desc.semantic == .Color
+			if multi {
 				ok = layers.get_components(w.store, view.layer, u8(level), h, comps[:nc])
 				if !ok && view.fill_from_coarser {
 					cell := h
@@ -179,6 +180,12 @@ draw_layer :: proc(r: ^Renderer, w: ^world.World, cam: ^Camera, view: View) -> (
 			rgb: layers.RGB
 			if desc.semantic == .Composition {
 				rgb = layers.composition_color(desc, comps[:nc])
+			} else if desc.semantic == .Color {
+				rgb = layers.RGB {
+					u8(clamp(comps[0], 0, 255)),
+					u8(clamp(comps[1], 0, 255)),
+					u8(clamp(comps[2], 0, 255)),
+				}
 			} else if desc.semantic == .Categorical || desc.semantic == .Boolean {
 				rgb = layers.value_color(desc, value)
 			} else {
@@ -255,6 +262,9 @@ draw_legend :: proc(
 			rl.DrawText(strings.clone_to_cstring(cat.name, context.temp_allocator), x + 20, cy, 12, rl.LIGHTGRAY)
 			cy += 17
 		}
+	case .Color:
+		rl.DrawText("true colour RGB, 0-255 per channel", x, cy, 12, rl.LIGHTGRAY)
+		cy += 17
 	case:
 		bar_h := i32(14)
 		for i in 0 ..< width {
@@ -313,6 +323,21 @@ draw_cell_inspector :: proc(
 			idx, share := layers.dominant_component(comps[:nc])
 			name := idx >= 0 && idx < len(d.categories) ? d.categories[idx].name : "?"
 			rl.DrawText(fmt.ctprintf("%s: %s %.0f%%", d.name, name, share * 100), x, cy, 12, rl.LIGHTGRAY)
+			cy += 15
+			rows += 1
+			continue
+		}
+		if d.semantic == .Color {
+			if !layers.get_components(w.store, id, u8(level), h, comps[:nc]) {
+				continue
+			}
+			rl.DrawText(
+				fmt.ctprintf("%s: rgb(%.0f, %.0f, %.0f)", d.name, comps[0], comps[1], comps[2]),
+				x,
+				cy,
+				12,
+				rl.LIGHTGRAY,
+			)
 			cy += 15
 			rows += 1
 			continue

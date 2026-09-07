@@ -65,6 +65,8 @@ value_color :: proc(d: ^Layer_Desc, value: f64) -> RGB {
 		return value != 0 ? RGB{240, 240, 240} : RGB{30, 30, 30}
 	case .Scalar, .Fraction, .Composition, .Vector, .Density, .Direction:
 	// handled below
+	case .Color:
+		return RGB{160, 160, 160} // callers should use the raw components instead
 	}
 	span := d.max_value - d.min_value
 	t := span <= 0 ? 0.0 : (value - d.min_value) / span

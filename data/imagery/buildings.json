@@ -1,0 +1,6 @@
+{
+  "sources": [
+    { "path": "buildings.tif", "layer": "imagery.true_color", "resample": "auto" }
+  ],
+  "build_pyramid": true
+}

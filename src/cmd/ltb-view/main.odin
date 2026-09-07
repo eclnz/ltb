@@ -37,6 +37,8 @@ main :: proc() {
 			set = CLOSE_SHOTS[:]
 		case "terrain":
 			set = TERRAIN_SHOTS[:]
+		case "imagery":
+			set = IMAGERY_SHOTS[:]
 		}
 		run_capture(&a, opts.shots_dir, set)
 		return
@@ -381,6 +383,53 @@ TERRAIN_SHOTS := [?]Shot {
 		grid = true,
 		shade = 0.5,
 		force_level = -1,
+		inspector = true,
+	},
+}
+
+// Real 1 m NAIP aerial photography over Miami, FL, ingested onto a 0.5 m hex
+// grid: finer than the source, so each pixel covers about four cells.
+IMAGERY_SHOTS := [?]Shot {
+	{
+		file = "i01-full.png",
+		layer = "imagery.true_color",
+		caption = "real 1 m NAIP aerial photography, ingested onto a 0.5 m hex grid",
+		force_level = -1,
+		inspector = true,
+	},
+	{
+		file = "i02-200m.png",
+		layer = "imagery.true_color",
+		caption = "200 m across - individual roofs, driveways and pools",
+		zoom = 0.14,
+		force_level = -1,
+		inspector = true,
+	},
+	{
+		file = "i03-40m.png",
+		layer = "imagery.true_color",
+		caption = "40 m across - a single building",
+		zoom = 0.028,
+		force_level = -1,
+		inspector = true,
+	},
+	{
+		file = "i04-20m.png",
+		layer = "imagery.true_color",
+		caption = "20 m across, hex grid on - half-metre cells, each about a quarter of a source pixel",
+		zoom = 0.0139,
+		grid = true,
+		force_level = -1,
+		inspector = true,
+	},
+	{
+		file = "i05-lod.png",
+		layer = "imagery.true_color",
+		caption = "same view, one pyramid level up: cells average four times the source pixels",
+		zoom = 0.0139,
+		grid = true,
+		force_level = 1,
+		fill = true,
 		inspector = true,
 	},
 }

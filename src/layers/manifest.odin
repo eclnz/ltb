@@ -186,6 +186,9 @@ layer_from_json :: proc(obj: json.Object, allocator := context.allocator) -> (d:
 			}
 		}
 	}
+	if d.semantic == .Color {
+		d.components = 3
+	}
 
 	d.palette = palette_by_name(json_string(obj, "palette"), d.semantic)
 	desc_normalize(&d)
@@ -259,6 +262,8 @@ semantic_from_name :: proc(s: string) -> Semantic {
 		return .Direction
 	case "boolean", "bool", "flag":
 		return .Boolean
+	case "color", "colour", "rgb":
+		return .Color
 	}
 	return .Scalar
 }

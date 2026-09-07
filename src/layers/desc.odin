@@ -49,6 +49,7 @@ Semantic :: enum u8 {
 	Density,     // a per-area quantity; sums when cells merge
 	Direction,   // an angle in degrees; averages circularly
 	Boolean,     // 0 or 1
+	Color,       // 3 components, raw 0..255 RGB; drawn directly, never through a palette
 }
 
 // How child cells combine into a parent cell one level up the pyramid.
@@ -248,7 +249,7 @@ default_aggregate :: proc "contextless" (s: Semantic) -> Aggregate {
 		return .Circular_Mean
 	case .Boolean:
 		return .Any
-	case .Scalar, .Fraction, .Vector:
+	case .Scalar, .Fraction, .Vector, .Color:
 		return .Mean
 	}
 	return .Mean

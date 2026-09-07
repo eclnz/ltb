@@ -34,3 +34,20 @@ echo
 echo "ready. render the region with:"
 echo "  ./build/ltb-view --no-generate --lat 43.5 --lon -79.5 --span 55 \\"
 echo "      --cell-area 250000 --levels 7 --manifest data/ne/ontario.json"
+
+mkdir -p ../imagery
+cd ../imagery
+NAIP=https://raw.githubusercontent.com/opengeos/data/main/naip
+for f in buildings campus; do
+  if [ -f "$f.tif" ]; then
+    echo "have $f.tif"
+  else
+    echo "fetching $f.tif"
+    curl -fsSL --retry 3 -o "$f.tif" "$NAIP/$f.tif"
+  fi
+done
+
+echo
+echo "close-up 0.5 m imagery, real 1 m NAIP aerial photography (Miami, FL):"
+echo "  ./build/ltb-view --no-generate --lat 25.7916 --lon -80.3638 --span 1.3 \\"
+echo "      --cell-area 0.2165 --levels 12 --manifest data/imagery/buildings.json"

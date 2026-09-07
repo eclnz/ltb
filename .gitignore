@@ -7,3 +7,6 @@
 # Sample datasets: redistributable but large. tools/fetch-sample-data.sh gets them.
 /data/ne/*.geojson
 /data/ne/*.tif
+
+# NAIP aerial imagery samples: real, redistributable, but large.
+/data/imagery/*.tif

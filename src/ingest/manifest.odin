@@ -617,6 +617,8 @@ projection_for_epsg :: proc(epsg: int) -> (geo.Projection, bool) {
 		return geo.proj_utm(epsg - 32600, true), true
 	case epsg >= 32701 && epsg <= 32760:
 		return geo.proj_utm(epsg - 32700, false), true
+	case epsg >= 26901 && epsg <= 26923:
+		return geo.proj_utm(epsg - 26900, true, geo.GRS80), true
 	case epsg == 3035:
 		return geo.proj_laea(52, 10, geo.GRS80, 4_321_000, 3_210_000), true
 	case epsg == 2193:

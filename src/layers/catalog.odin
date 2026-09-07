@@ -122,6 +122,19 @@ composition_layer :: proc(name, group: string, cats: []Category, description := 
 	return d
 }
 
+// Three raw 0..255 channels, drawn directly as a colour rather than through a
+// palette. Aggregating up the pyramid averages each channel, which is the
+// right thing for a photograph: a coarser cell is the mean colour of what it
+// covers.
+@(private)
+color_layer :: proc(name, group: string, description := "") -> Layer_Desc {
+	d := scalar_layer(name, group, "", .U8, 1, 0, 0, 255, PALETTE_CATEGORICAL, .Mean, description, has_nodata = false)
+	d.semantic = .Color
+	d.components = 3
+	d.interp = .Linear
+	return d
+}
+
 @(private)
 direction_layer :: proc(name, group: string, description := "") -> Layer_Desc {
 	d := scalar_layer(name, group, "degrees", .U16, 360.0 / 65534.0, 0, 0, 360, PALETTE_CYCLIC, .Circular_Mean, description)
@@ -293,6 +306,7 @@ OWNERSHIP_CLASSES := [?]Category {
 // Registers the whole standard catalogue. Safe to call more than once; existing
 // names keep their original descriptor and id.
 register_standard_layers :: proc(r: ^Registry) {
+	register_imagery_layers(r)
 	register_terrain_layers(r)
 	register_hydrology_layers(r)
 	register_climate_layers(r)
@@ -302,6 +316,11 @@ register_standard_layers :: proc(r: ^Registry) {
 	register_fauna_layers(r)
 	register_human_layers(r)
 	register_simulation_layers(r)
+}
+
+register_imagery_layers :: proc(r: ^Registry) {
+	register(r, color_layer("imagery.true_color", "imagery",
+		"RGB aerial or satellite photography, resampled onto the grid at ingest."))
 }
 
 register_terrain_layers :: proc(r: ^Registry) {

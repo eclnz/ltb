@@ -424,6 +424,9 @@ geotiff_projection :: proc(t: ^Tiff_Reader) -> (geo.Projection, Geotiff_Error) {
 		return geo.proj_utm(int(epsg) - 32600, true), .None
 	case epsg >= 32701 && epsg <= 32760:
 		return geo.proj_utm(int(epsg) - 32700, false), .None
+	case epsg >= 26901 && epsg <= 26923:
+		// NAD83 UTM, north zones only: NAD83 has no southern hemisphere realisation.
+		return geo.proj_utm(int(epsg) - 26900, true, geo.GRS80), .None
 	case epsg == 3857:
 		return geo.proj_web_mercator(), .None
 	case epsg == 3035:
