@@ -1,4 +1,13 @@
 {
+  "region": {
+    "title": "Miami, FL -- 1 m NAIP aerial photography",
+    "lat": 25.7916, "lon": -80.3638,
+    "span_km": 1.1,
+    "cell_area": 0.2165,
+    "levels": 12,
+    "layer": "imagery.true_color"
+  },
+
   "sources": [
     { "path": "buildings.tif", "layer": "imagery.true_color", "resample": "auto" }
   ],

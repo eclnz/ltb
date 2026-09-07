@@ -1,4 +1,12 @@
 {
+  "region": {
+    "title": "Ontario -- Natural Earth vectors over SRTM",
+    "lat": 43.5, "lon": -79.5,
+    "span_km": 55,
+    "cell_area": 250000,
+    "levels": 7
+  },
+
   "layers": [
     {
       "name": "human.settlement_population",

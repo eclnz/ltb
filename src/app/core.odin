@@ -17,7 +17,6 @@ import "ltb:ingest"
 import "ltb:layers"
 import "ltb:sim"
 import "ltb:world"
-import "ltb:worldgen"
 
 App :: struct {
 	registry: layers.Registry,
@@ -66,40 +65,17 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 
 	report_world(&app.world, opts)
 
-	// Generate a landscape, then overwrite parts of it with real data if any
-	// was given. Generating first means an ingest that covers only part of the
-	// region still leaves a coherent world around it.
+	// Every cell the world holds comes from a file. Nothing is invented to fill
+	// the gaps, so a layer with no data reads as no data rather than as a
+	// plausible-looking model of something that was never measured.
 	if len(opts.manifest) > 0 {
 		load_manifest(&app.world, opts.manifest)
 	}
 	if len(opts.load_path) > 0 {
 		load_source(&app.world, opts.load_path, opts.load_layer)
 	}
-
-	if !opts.no_generate {
-		gen_start := time.now()
-		params := worldgen.default_params()
-		params.seed = opts.seed
-		// A DEM that has already been ingested is the terrain; everything the
-		// model derives is then driven by real topography.
-		if id, found := layers.lookup(&app.registry, "terrain.elevation"); found {
-			params.use_existing_elevation = layers.count_chunks(&app.store, id, 0) > 0
-		}
-		if params.use_existing_elevation {
-			fmt.println("modelling climate, soil, hydrology and vegetation on the ingested terrain")
-		}
-		stats, gen_ok := worldgen.generate(&app.world, params)
-		if !gen_ok {
-			fmt.eprintln("world generation failed: the standard layer catalogue is missing entries")
-			return false
-		}
-		fmt.printfln(
-			"modelled %d cells (%d land, %d forested) in %.2f s",
-			stats.cells,
-			stats.land_cells,
-			stats.forested,
-			time.duration_seconds(time.since(gen_start)),
-		)
+	if len(opts.manifest) == 0 && len(opts.load_path) == 0 {
+		fmt.eprintln("no data given: pass --manifest or --load, or open a dataset from the File menu")
 	}
 
 	report_store(&app.store, &app.registry)

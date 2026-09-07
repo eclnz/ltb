@@ -203,7 +203,9 @@ children :: proc "contextless" (h: hex.Hex, out: ^[MAX_CHILDREN]hex.Hex) -> []he
 // Picks the coarsest level whose cells still cover at least `min_pixels` on
 // screen, given how many metres one pixel spans. This is the mipmap choice:
 // zoom out and the world quietly switches to coarser, cheaper data.
-level_for_scale :: proc(w: ^World, metres_per_pixel: f64, min_pixels: f64 = 8.0) -> int {
+// `min_pixels` is the caller's: the renderer owns the policy, so there is no
+// second default here to disagree with it.
+level_for_scale :: proc(w: ^World, metres_per_pixel: f64, min_pixels: f64) -> int {
 	if metres_per_pixel <= 0 {
 		return 0
 	}

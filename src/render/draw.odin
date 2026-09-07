@@ -28,6 +28,10 @@ View :: struct {
 	fill_from_coarser: bool,
 }
 
+// The ground the map is drawn on, and what the window shows when there is no
+// map to draw.
+BACKGROUND :: rl.Color{14, 16, 20, 255}
+
 default_view :: proc(layer: layers.Layer_Id) -> View {
 	return View {
 		layer = layer,
@@ -36,7 +40,7 @@ default_view :: proc(layer: layers.Layer_Id) -> View {
 		force_level = -1,
 		auto_range = true,
 		grid_color = rl.Color{0, 0, 0, 60},
-		background = rl.Color{14, 16, 20, 255},
+		background = BACKGROUND,
 		fill_from_coarser = true,
 	}
 }

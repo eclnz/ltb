@@ -81,9 +81,19 @@ camera_view_rect :: proc(c: ^Camera) -> (min, max: geo.Point) {
 		geo.Point{c.center.x + half_w, c.center.y + half_h}
 }
 
+/*
+How small a cell may get on screen before the renderer steps up a pyramid
+level. Cells at each level are twice as wide as the one below, so doubling this
+draws the level above and cells twice the size at the same zoom.
+
+Fourteen pixels keeps a hexagon large enough to read as a hexagon, and to be
+worth an inspector hover, rather than dissolving into a pixel haze.
+*/
+MIN_CELL_PIXELS :: 14.0
+
 // The pyramid level whose cells are large enough to be worth drawing at this
 // zoom, and the axial bounds of the viewport at that level.
-camera_visible :: proc(c: ^Camera, w: ^world.World, min_cell_pixels := 7.0) -> (level: int, bounds: hex.Bounds) {
+camera_visible :: proc(c: ^Camera, w: ^world.World, min_cell_pixels := MIN_CELL_PIXELS) -> (level: int, bounds: hex.Bounds) {
 	level = world.level_for_scale(w, c.metres_per_pixel, min_cell_pixels)
 	mn, mx := camera_view_rect(c)
 	bounds = hex.bounds_covering_rect(world.layout(w, level), mn, mx)

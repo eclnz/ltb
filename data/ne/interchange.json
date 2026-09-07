@@ -1,4 +1,13 @@
 {
+  "region": {
+    "title": "Toronto 401/427/409 interchange -- half-metre cells",
+    "lat": 43.6905, "lon": -79.5843,
+    "span_km": 0.6,
+    "cell_area": 0.2165,
+    "levels": 12,
+    "layer": "human.road_class"
+  },
+
   "layers": [
     {
       "name": "logistics.haul_speed",

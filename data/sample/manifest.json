@@ -1,4 +1,12 @@
 {
+  "region": {
+    "title": "Sample -- Nelson / Marlborough, NZ",
+    "lat": -41.7, "lon": 173.2,
+    "span_km": 70,
+    "cell_area": 250000,
+    "levels": 7
+  },
+
   "layers": [
     {
       "name": "logistics.haul_speed",

@@ -1,4 +1,8 @@
 {
+  "region": {
+    "title": "Sierra Nevada SRTM -- set lat/lon for your srtm90.tif"
+  },
+
   "sources": [
     { "path": "srtm90.tif", "layer": "terrain.elevation", "resample": "auto" }
   ],
