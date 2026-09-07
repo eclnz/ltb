@@ -397,10 +397,9 @@ key_double :: proc(k: ^Geo_Keys, id: u16, default: f64 = 0) -> f64 {
 
 // Resolves the file's CRS to one of the engine's projections.
 //
-// EPSG codes are matched for the families that cover most published data; a
+// EPSG codes are matched for the families that cover most published data, and a
 // user-defined projection is rebuilt from its GeoTIFF parameters. Anything else
-// is refused, because a raster placed with the wrong projection is worse than
-// one that fails to load.
+// returns .Unknown_Crs; pass `crs_override` to place the raster by hand.
 geotiff_projection :: proc(t: ^Tiff_Reader) -> (geo.Projection, Geotiff_Error) {
 	keys, ok := read_geo_keys(t, context.temp_allocator)
 	if !ok {

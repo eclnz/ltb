@@ -6,11 +6,9 @@ import hex "ltb:hex"
 /*
 Sparse accumulation of many source values into hex cells.
 
-Both of the engine's resampling paths need the same thing: visit a stream of
-(cell, values) pairs in arbitrary order, combine them per the layer's rule, and
-write one value per touched cell. Building a coarse pyramid level does it with
-finer cells as the source; ingesting a raster does it with source pixels. The
-accumulator is that shared machinery.
+Visits a stream of (cell, values) pairs in arbitrary order, combines them per the
+layer's rule, and writes one value per touched cell. Building a coarse pyramid
+level feeds it finer cells; ingesting a raster feeds it source pixels.
 
 Only touched cells are stored, so cost scales with the data rather than with the
 world.
@@ -44,9 +42,9 @@ Accumulator :: struct {
 // `rule` overrides the descriptor's aggregate; pass the descriptor's own rule
 // to keep it.
 //
-// Prefer a heap allocator here rather than the temporary one: an accumulator
-// over a large region holds tens of megabytes, and an arena would not hand any
-// of it back when the accumulator is destroyed.
+// An accumulator over a large region holds tens of megabytes, so `allocator`
+// should be one that reclaims on `accum_destroy`. `expect_cells` sizes the
+// tables up front.
 accum_init :: proc(a: ^Accumulator, d: ^Layer_Desc, rule: Aggregate, allocator := context.allocator, expect_cells := 1024) {
 	a.desc = d
 	a.rule = rule
@@ -85,8 +83,6 @@ accum_slot :: proc(a: ^Accumulator, h: hex.Hex) -> int {
 	}
 	i := len(a.counts)
 	a.index[h] = i
-	// `append` grows capacity geometrically; `resize` would reallocate to the
-	// exact length on every cell, which is quadratic.
 	append(&a.counts, 0)
 	for _ in 0 ..< a.nc {
 		append(&a.sums, 0)
@@ -211,10 +207,27 @@ accum_finish :: proc(a: ^Accumulator, slot: int, out: []f64) {
 
 // Writes every accumulated cell into the store and returns how many were
 // written.
-accum_flush :: proc(a: ^Accumulator, s: ^Store, layer: Layer_Id, level: u8) -> (written: int) {
+//
+// `post` runs on each finished component before it is stored, which is how a
+// caller turns accumulated metres into a density, or clamps overlapping
+// coverage back into [0, 1], without a second pass over the cells.
+accum_flush :: proc(
+	a: ^Accumulator,
+	s: ^Store,
+	layer: Layer_Id,
+	level: u8,
+	post: proc(value: f64) -> f64 = nil,
+) -> (
+	written: int,
+) {
 	out: [MAX_ACCUM_COMPONENTS]f64
 	for h, slot in a.index {
 		accum_finish(a, slot, out[:a.nc])
+		if post != nil {
+			for i in 0 ..< a.nc {
+				out[i] = post(out[i])
+			}
+		}
 		if a.nc == 1 {
 			set(s, layer, level, h, out[0])
 		} else {

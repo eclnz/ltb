@@ -39,7 +39,7 @@ build_level :: proc(w: ^World, layer: layers.Layer_Id, source_level: int) -> (wr
 	}
 
 	// A coarse cell covers four fine ones, so the destination is a quarter the
-	// size of the source. Sizing the accumulator up front avoids regrowing it.
+	// size of the source.
 	a: layers.Accumulator
 	layers.accum_init(&a, d, d.aggregate, context.allocator, len(chunks) * layers.CHUNK_AREA / 4)
 	defer layers.accum_destroy(&a)

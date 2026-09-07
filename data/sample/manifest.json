@@ -1,0 +1,45 @@
+{
+  "layers": [
+    {
+      "name": "logistics.haul_speed",
+      "group": "logistics",
+      "unit": "km/h",
+      "description": "free-flow speed of the fastest road in the cell",
+      "type": "u8", "scale": 0.5,
+      "semantic": "scalar", "aggregate": "max",
+      "min": 0, "max": 120,
+      "palette": "viridis"
+    }
+  ],
+
+  "sources": [
+    { "path": "terrain.tif", "layer": "terrain.elevation" },
+
+    { "path": "osm.geojson", "layer": "human.road_class",
+      "measure": "value", "rule": "max",
+      "value": { "classify": "highway", "table": "osm_highway" },
+      "filter": [ { "key": "highway" } ] },
+
+    { "path": "osm.geojson", "layer": "logistics.haul_speed",
+      "measure": "value", "rule": "max",
+      "value": { "classify": "highway", "table": "osm_highway_speed" },
+      "filter": [ { "key": "highway" } ] },
+
+    { "path": "osm.geojson", "layer": "human.road_density",
+      "measure": "density", "value": { "constant": 1 },
+      "unit_scale": 0.001,
+      "filter": [ { "key": "highway" } ] },
+
+    { "path": "osm.geojson", "layer": "human.built_up",
+      "measure": "coverage", "coverage_samples": 19,
+      "filter": [ { "key": "building" } ] },
+
+    { "path": "osm.geojson", "layer": "land.cover",
+      "measure": "value", "rule": "majority",
+      "value": { "classify": "landuse", "table": "osm_landcover" },
+      "filter": [ { "key": "landuse" } ] }
+  ],
+
+  "derive": [ "slope_aspect", "hillshade" ],
+  "build_pyramid": true
+}

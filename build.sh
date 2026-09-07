@@ -31,7 +31,7 @@ case "$mode" in
   check)
     for pkg in src/hex src/geo src/layers src/world src/ingest src/worldgen src/sim src/render src/app; do
       echo "checking $pkg"
-      $ODIN check "$pkg" $COLLECTION
+      $ODIN check "$pkg" $COLLECTION -no-entry-point
     done
     ;;
   headless)

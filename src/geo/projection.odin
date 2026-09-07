@@ -5,10 +5,9 @@ import "core:math"
 // The projections the engine can read data in, and can use as a world
 // reference frame.
 //
-// For a simulation the choice matters: an equal-area projection keeps every hex
-// covering the same amount of real ground, which is what makes per-cell
-// densities (people per cell, tonnes of biomass per cell) comparable across the
-// map. Lambert Azimuthal Equal Area is the default world frame for that reason.
+// An equal-area projection keeps every hex covering the same amount of real
+// ground, so per-cell densities are comparable across the map. Lambert Azimuthal
+// Equal Area is the default world frame.
 Projection_Kind :: enum u8 {
 	Geographic,          // pass-through degrees; x = lon, y = lat
 	Equirectangular,     // plate carree with a true-scale parallel

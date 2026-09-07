@@ -155,6 +155,55 @@ is_nodata_raw :: #force_inline proc "contextless" (d: ^Layer_Desc, raw: f64) -> 
 	return raw == d.nodata_raw
 }
 
+// Lowest and highest raw values the layer's element type can hold. Float types
+// are unbounded.
+raw_range :: proc "contextless" (k: Element_Kind) -> (lo, hi: f64) {
+	switch k {
+	case .U8:
+		return 0, 255
+	case .I8:
+		return -128, 127
+	case .U16:
+		return 0, 65535
+	case .I16:
+		return -32768, 32767
+	case .U32:
+		return 0, 4294967295
+	case .I32:
+		return -2147483648, 2147483647
+	case .F32, .F64:
+		return min(f64), max(f64)
+	}
+	return 0, 0
+}
+
+// Encodes a value to its raw form, clamped to a value the layer can store and
+// distinguish from its nodata sentinel.
+//
+// `saturated` reports that the value did not fit and was pinned to the end of
+// the range.
+encode_storable :: proc "contextless" (d: ^Layer_Desc, v: f64) -> (raw: f64, saturated: bool) {
+	raw = encode_value(d, v)
+	if raw != raw {
+		return raw, false
+	}
+	lo, hi := raw_range(d.kind)
+	if d.has_nodata {
+		if d.nodata_raw == hi {
+			hi -= 1
+		} else if d.nodata_raw == lo {
+			lo += 1
+		}
+	}
+	if raw < lo {
+		return lo, true
+	}
+	if raw > hi {
+		return hi, true
+	}
+	return raw, false
+}
+
 // A sensible aggregate rule when a descriptor does not name one.
 default_aggregate :: proc "contextless" (s: Semantic) -> Aggregate {
 	switch s {
@@ -219,8 +268,7 @@ registry_destroy :: proc(r: ^Registry) {
 }
 
 // Registers a layer. Re-registering a name returns the existing id and leaves
-// the original descriptor in place, so a manifest cannot silently redefine a
-// layer another system already holds an id for.
+// the original descriptor in place.
 register :: proc(r: ^Registry, desc: Layer_Desc) -> (id: Layer_Id, fresh: bool) {
 	if existing, found := r.by_name[desc.name]; found {
 		return existing, false

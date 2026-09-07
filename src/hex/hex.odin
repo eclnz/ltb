@@ -337,8 +337,8 @@ cell_pitch :: proc "contextless" (l: Layout) -> f64 {
 // Region queries
 // ---------------------------------------------------------------------------
 
-// Inclusive axial bounds. Note that an axial rectangle is a parallelogram in
-// world space, so `bounds_covering_rect` deliberately over-covers.
+// Inclusive axial bounds. An axial rectangle is a parallelogram in world space,
+// so `bounds_covering_rect` over-covers.
 Bounds :: struct {
 	q0, r0: i32, // inclusive
 	q1, r1: i32, // inclusive

@@ -1,11 +1,9 @@
 /*
 Package ingest turns real map data into hex layers.
 
-The pipeline is deliberately narrow: a reader produces a `Raster` -- a
-georeferenced grid of numbers with a known CRS -- and `rasterize` resamples that
-raster onto a world's hex grid at level 0. Every source format the engine grows
-support for stops at `Raster`; nothing downstream needs to know whether the
-numbers came from a GeoTIFF, an ASCII grid or a procedural generator.
+A reader produces a `Raster` -- a georeferenced grid of numbers with a known CRS
+-- and `rasterize` resamples it onto a world's hex grid. Every raster format
+stops at `Raster`, so nothing downstream depends on the source format.
 */
 package ingest
 

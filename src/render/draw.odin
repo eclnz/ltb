@@ -21,7 +21,7 @@ View :: struct {
 	grid_color:     rl.Color,
 	background:     rl.Color,
 	// Fills cells with no data at the drawn level by walking up the pyramid.
-	// Off is honest about coverage; on looks better.
+	// With it off, a cell is drawn only where the drawn level itself has data.
 	fill_from_coarser: bool,
 }
 
@@ -62,8 +62,7 @@ draw_layer :: proc(w: ^world.World, cam: ^Camera, view: View) -> (stats: Stats) 
 	lay := world.layout(w, level)
 	shade_id, has_shade := layers.lookup(w.registry, "terrain.hillshade")
 
-	// Cell radius in pixels. Below about a pixel and a half there is no point
-	// drawing polygons; the LOD choice normally keeps us well above that.
+	// Cell radius in pixels.
 	radius_px := f32(math.sqrt(lay.size.x * lay.size.y) / cam.metres_per_pixel)
 	rotation := f32(lay.orientation.start_angle == 0.5 ? 0.0 : 30.0)
 

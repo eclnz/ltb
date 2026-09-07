@@ -41,6 +41,9 @@ Store :: struct {
 	// be persisted instead of lost.
 	on_evict:       proc(store: ^Store, chunk: ^Chunk),
 	user_data:      rawptr,
+	// Writes whose value did not fit the layer's element type and were pinned
+	// to the end of its range.
+	saturated:      int,
 }
 
 store_init :: proc(s: ^Store, registry: ^Registry, allocator := context.allocator) {
@@ -212,8 +215,8 @@ fill_chunk_raw :: proc(d: ^Layer_Desc, c: ^Chunk, raw: f64) {
 }
 
 // Drops least-recently-used chunks until the store is inside its byte budget.
-// Dirty chunks are handed to `on_evict` first; without a handler they are kept,
-// because dropping generated data silently is worse than exceeding the budget.
+// Dirty chunks are handed to `on_evict` first; without a handler they are kept
+// and the budget is exceeded.
 store_trim :: proc(s: ^Store) -> (evicted: int) {
 	if s.budget_bytes <= 0 || s.bytes_resident <= s.budget_bytes {
 		return 0
@@ -316,7 +319,11 @@ set :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex, value: f64) -> bo
 	if c == nil {
 		return false
 	}
-	write_element(d.kind, rawptr(uintptr(raw_data(c.data)) + uintptr(idx * c.stride)), encode_value(d, value))
+	raw, saturated := encode_storable(d, value)
+	if saturated {
+		s.saturated += 1
+	}
+	write_element(d.kind, rawptr(uintptr(raw_data(c.data)) + uintptr(idx * c.stride)), raw)
 	c.dirty = true
 	return true
 }
@@ -338,7 +345,11 @@ set_components :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex, values
 	esz := element_size(d.kind)
 	base := uintptr(raw_data(c.data)) + uintptr(idx * c.stride)
 	for i in 0 ..< nc {
-		write_element(d.kind, rawptr(base + uintptr(i * esz)), encode_value(d, values[i]))
+		raw, saturated := encode_storable(d, values[i])
+		if saturated {
+			s.saturated += 1
+		}
+		write_element(d.kind, rawptr(base + uintptr(i * esz)), raw)
 	}
 	c.dirty = true
 	return true
@@ -397,11 +408,8 @@ view_get :: #force_inline proc "contextless" (v: Chunk_View, index: int) -> (f64
 }
 
 view_set :: #force_inline proc "contextless" (v: Chunk_View, index: int, value: f64) {
-	write_element(
-		v.desc.kind,
-		rawptr(uintptr(raw_data(v.chunk.data)) + uintptr(index * v.chunk.stride)),
-		encode_value(v.desc, value),
-	)
+	raw, _ := encode_storable(v.desc, value)
+	write_element(v.desc.kind, rawptr(uintptr(raw_data(v.chunk.data)) + uintptr(index * v.chunk.stride)), raw)
 	v.chunk.dirty = true
 }
 
@@ -476,11 +484,8 @@ view_component :: #force_inline proc "contextless" (v: Chunk_View, cell_base, co
 	return decode_value(v.desc, raw), true
 }
 
-// Visits every cell of one layer at one level that holds data.
-//
-// Iterating the resident chunks is the only sane way to sweep a sparse world:
-// it touches the cells that exist, in memory order, instead of walking an index
-// space that is mostly empty.
+// Visits every cell of one layer at one level that holds data, in chunk memory
+// order. Cost is proportional to the data present, not to the index space.
 for_each_cell :: proc(
 	s: ^Store,
 	layer: Layer_Id,

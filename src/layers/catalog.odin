@@ -3,15 +3,12 @@ package layers
 /*
 The standard layer catalogue.
 
-None of this is privileged: every entry here is an ordinary `Layer_Desc` that
-could equally have come from a manifest file. It exists so a new world starts
-with a broad, coherent set of layers already named, typed, scaled and coloured,
-and so there is a worked example of every semantic the engine supports.
+Every entry here is an ordinary `Layer_Desc` that could equally have come from a
+manifest file. Between them they cover every semantic the engine supports.
 
-Storage cost is the reason for the integer types and scales. A f32 elevation
-layer costs 4 bytes a cell; i16 centimetres-free decimetres costs 2 and still
-resolves terrain to 10 cm. Multiply by a hundred million cells and the choice
-stops being cosmetic.
+The integer types and scales are chosen for storage cost: elevation as i16
+decimetres is 2 bytes a cell and still resolves terrain to 10 cm, against 4
+bytes for f32.
 */
 
 NAN :: f64(0h7ff8_0000_0000_0000)

@@ -2,11 +2,9 @@
 Package worldgen fills a world with a plausible landscape when there is no real
 data to hand.
 
-It exists for two reasons. It makes the engine runnable and testable without a
-multi-gigabyte download, and it is a worked example of how the layers relate:
-terrain drives climate, climate and terrain drive soil and vegetation, and the
-hydrology falls out of the terrain by routing water downhill across the hex
-graph. Swapping in real rasters replaces the inputs, not the structure.
+Terrain drives climate, terrain and climate drive soil and vegetation, and the
+hydrology comes from routing water downhill across the hex graph. Ingesting real
+rasters replaces the inputs to that chain, not its structure.
 */
 package worldgen
 

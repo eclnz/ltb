@@ -64,7 +64,7 @@ camera_pan_pixels :: proc(c: ^Camera, dx, dy: f64) {
 }
 
 // Zooms by a multiplicative factor, keeping the world point under `anchor`
-// (in screen pixels) fixed. This is what makes wheel-zoom feel right.
+// (in screen pixels) fixed.
 camera_zoom_at :: proc(c: ^Camera, factor: f64, anchor: [2]f64) {
 	before := screen_to_world(c, anchor)
 	c.metres_per_pixel = clamp(c.metres_per_pixel * factor, c.min_mpp, c.max_mpp)

@@ -4,12 +4,10 @@ import "core:math"
 import "ltb:layers"
 
 /*
-Two small systems, here to be read and copied rather than believed.
+Example systems, kept as templates for the pattern: bind layers in `setup`,
+write cells in `update`, mark what you wrote dirty.
 
-They exist so the scheduler has something to run and so there is a worked
-example of the pattern: bind layers in `setup`, write cells in `update`, mark
-what you wrote dirty. Neither is a model of anything in particular, and the
-real domain systems -- roads, habitation, logistics -- will replace them.
+Neither is a model of anything in particular. Domain systems replace them.
 */
 
 // ---------------------------------------------------------------------------
@@ -27,9 +25,7 @@ Moisture_State :: struct {
 // Relaxes soil moisture towards the value the climate implies.
 //
 // A first-order bucket: the gap to equilibrium closes exponentially with a time
-// constant of a few weeks. It is the simplest thing that gives a landscape a
-// memory of last month's weather, which is what most later systems will want
-// from it.
+// constant of a few weeks, so the landscape carries a memory of recent weather.
 moisture_system :: proc() -> System {
 	return System {
 		name = "moisture",
@@ -105,9 +101,8 @@ Growth_State :: struct {
 // Grows canopy cover logistically towards what the site can support.
 //
 // Carrying capacity comes from warmth, water, rooting depth and steepness;
-// cover then approaches it at a rate of about 11% a year, which closes a canopy
-// in roughly four decades on a productive site. Deliberately one equation: the
-// point is the plumbing, not the forestry.
+// cover then approaches it at about 11% a year, closing a canopy in roughly
+// four decades on a productive site.
 forest_growth_system :: proc() -> System {
 	return System {
 		name = "forest growth",

@@ -1,12 +1,9 @@
 /*
-Package app wires the engine together: it builds a world from command-line
-options, generates or ingests its data, sets up the simulation and reports on
-what it made.
+Package app builds a world from command-line options, generates or ingests its
+data, sets up the simulation and reports on what it made.
 
-It deliberately knows nothing about drawing. The headless command links this
-package alone and needs no graphics libraries at all; the windowed command adds
-the renderer on top. Keeping the split at a package boundary means the
-simulation can be run, profiled and tested on a machine with no display.
+It contains no drawing code. The headless command links this package alone and
+needs no graphics libraries; the windowed command adds ltb:render on top.
 */
 package app
 
@@ -35,6 +32,14 @@ App :: struct {
 startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 	layers.registry_init(&app.registry)
 	layers.register_standard_layers(&app.registry)
+	if len(opts.layer_file) > 0 {
+		added, lerr := layers.load_layer_manifest(&app.registry, opts.layer_file)
+		if lerr != .None {
+			fmt.eprintfln("could not read %s: %v", opts.layer_file, lerr)
+			return false
+		}
+		fmt.printfln("registered %d extra layers from %s", added, opts.layer_file)
+	}
 	layers.store_init(&app.store, &app.registry)
 	app.opts = opts
 
@@ -64,22 +69,27 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 	// Generate a landscape, then overwrite parts of it with real data if any
 	// was given. Generating first means an ingest that covers only part of the
 	// region still leaves a coherent world around it.
-	gen_start := time.now()
-	params := worldgen.default_params()
-	params.seed = opts.seed
-	stats, gen_ok := worldgen.generate(&app.world, params)
-	if !gen_ok {
-		fmt.eprintln("world generation failed: the standard layer catalogue is missing entries")
-		return false
+	if !opts.no_generate {
+		gen_start := time.now()
+		params := worldgen.default_params()
+		params.seed = opts.seed
+		stats, gen_ok := worldgen.generate(&app.world, params)
+		if !gen_ok {
+			fmt.eprintln("world generation failed: the standard layer catalogue is missing entries")
+			return false
+		}
+		fmt.printfln(
+			"generated %d cells (%d land, %d forested) in %.2f s",
+			stats.cells,
+			stats.land_cells,
+			stats.forested,
+			time.duration_seconds(time.since(gen_start)),
+		)
 	}
-	fmt.printfln(
-		"generated %d cells (%d land, %d forested) in %.2f s",
-		stats.cells,
-		stats.land_cells,
-		stats.forested,
-		time.duration_seconds(time.since(gen_start)),
-	)
 
+	if len(opts.manifest) > 0 {
+		load_manifest(&app.world, opts.manifest)
+	}
 	if len(opts.load_path) > 0 {
 		load_source(&app.world, opts.load_path, opts.load_layer)
 	}
@@ -129,10 +139,41 @@ run_ticks :: proc(s: ^sim.Sim, n: int) {
 	}
 }
 
+// Loads a whole dataset manifest, reporting each source. One bad download does
+// not stop the rest.
+load_manifest :: proc(w: ^world.World, path: string) {
+	start := time.now()
+	report, err := ingest.load_manifest(w, path)
+	if err != .None {
+		fmt.eprintfln("could not read %s: %v", path, err)
+		return
+	}
+	defer ingest.manifest_report_destroy(&report)
+
+	if report.layers_added > 0 {
+		fmt.printfln("manifest declared %d new layers", report.layers_added)
+	}
+	for s in report.sources {
+		mark := s.ok ? "ok  " : "FAIL"
+		fmt.printfln("  %s %-28s -> %-32s %s", mark, s.path, s.layer, s.message)
+	}
+	fmt.printfln(
+		"manifest: %d of %d sources loaded in %.2f s",
+		report.succeeded,
+		report.succeeded + report.failed,
+		time.duration_seconds(time.since(start)),
+	)
+}
+
 load_source :: proc(w: ^world.World, path, layer_name: string) {
 	id, found := layers.lookup(w.registry, layer_name)
 	if !found {
 		fmt.eprintfln("no layer named %q; run --list-layers to see the catalogue", layer_name)
+		return
+	}
+
+	if strings.has_suffix(path, ".geojson") || strings.has_suffix(path, ".json") {
+		load_vector_source(w, path, id, layer_name)
 		return
 	}
 
@@ -196,6 +237,49 @@ load_source :: proc(w: ^world.World, path, layer_name: string) {
 		world.build_pyramid(w, aspect, 0)
 		world.build_pyramid(w, shade, 0)
 	}
+}
+
+// Loads a single vector file with defaults chosen from the layer's semantic:
+// a categorical layer takes the feature's value, a fraction takes coverage,
+// and anything else counts density. A manifest gives finer control.
+load_vector_source :: proc(w: ^world.World, path: string, id: layers.Layer_Id, layer_name: string) {
+	fc, err := ingest.read_geojson(path)
+	if err != .None {
+		fmt.eprintfln("could not read %s: %v", path, err)
+		return
+	}
+	defer ingest.features_destroy(&fc)
+
+	points, lines, polys := ingest.feature_count_by_kind(&fc)
+	fmt.printfln("%s: %d point / %d line / %d polygon features", path, points, lines, polys)
+
+	d := layers.desc_of(w.registry, id)
+	opts := ingest.Vector_Options {
+		measure = .Density,
+		value   = ingest.constant_value(1),
+	}
+	#partial switch d.semantic {
+	case .Categorical:
+		opts.measure = .Value
+	case .Fraction:
+		opts.measure = .Coverage
+	case .Boolean:
+		opts.measure = .Presence
+	}
+
+	res, verr := ingest.vectorize(w, &fc, id, opts)
+	if verr != .None {
+		fmt.eprintfln("could not resample %s: %v", path, verr)
+		return
+	}
+	fmt.printfln(
+		"  -> %s: %d cells written (%d features used, %d filtered out)",
+		layer_name,
+		res.cells_written,
+		res.features_used,
+		res.features_skipped,
+	)
+	world.build_pyramid(w, id, 0)
 }
 
 // ---------------------------------------------------------------------------

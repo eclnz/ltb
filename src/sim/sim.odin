@@ -1,11 +1,9 @@
 /*
-Package sim is the tick machinery, not a game.
+Package sim owns the calendar, the list of systems and their cadences, and the
+bookkeeping that keeps the LOD pyramid in step with whatever the systems write.
 
-It owns a calendar, a list of systems and their cadences, and the bookkeeping
-that keeps the LOD pyramid in step with whatever the systems write. It knows
-nothing about forests, roads or people: a system carries its own layer bindings
-and its own state, so adding a domain means adding a file, and the scheduler
-never grows a field for it.
+It holds no domain state. A system carries its own layer bindings and its own
+state, so a domain is added as a file rather than as fields here.
 
 A system is three procs and a cadence:
 

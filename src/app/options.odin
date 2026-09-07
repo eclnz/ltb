@@ -20,6 +20,13 @@ Options :: struct {
 	// Ingest a GeoTIFF or ESRI ASCII grid into a named layer before starting.
 	load_path:    string,
 	load_layer:   string,
+	// Load a whole dataset manifest: several sources, each with its own
+	// resampling and attribute mapping.
+	manifest:     string,
+	// Extra layer declarations to register before anything else.
+	layer_file:   string,
+	// Skip procedural generation, so only ingested data is present.
+	no_generate:  bool,
 	// Window size for the interactive mode.
 	width, height: int,
 	print_layers: bool,
@@ -55,6 +62,9 @@ usage: ltb [options]
   --days-per-tick D     simulated days per tick (default 7)
   --load PATH           ingest a GeoTIFF or .asc file before starting
   --load-layer NAME     layer to ingest into (default terrain.elevation)
+  --manifest PATH       load a dataset manifest (rasters and vectors together)
+  --layers PATH         register extra layer declarations from a JSON file
+  --no-generate         skip procedural generation; use only ingested data
   --width N --height N  window size
   --list-layers         print the layer catalogue and exit
   --help                this message
@@ -121,6 +131,12 @@ parse_options :: proc() -> (o: Options, ok: bool) {
 			o.load_path = next_value(args, &i, a) or_return
 		case "--load-layer":
 			o.load_layer = next_value(args, &i, a) or_return
+		case "--manifest":
+			o.manifest = next_value(args, &i, a) or_return
+		case "--layers":
+			o.layer_file = next_value(args, &i, a) or_return
+		case "--no-generate":
+			o.no_generate = true
 		case "--width":
 			v := next_value(args, &i, a) or_return
 			o.width = strconv.parse_int(v) or_else o.width
