@@ -1,18 +1,21 @@
-package ingest
+package tiff
 
 import "core:bytes"
 import "core:compress/zlib"
 
 /*
-Baseline TIFF decoding: directory parsing and the four compressions that
-actually appear in published raster data (none, Deflate, LZW, PackBits).
+Package tiff is baseline TIFF decoding: directory parsing and the four
+compressions that actually appear in published raster data (none, Deflate, LZW,
+PackBits).
 
 GeoTIFF adds its georeferencing on top of these structures; that part lives in
-geotiff.odin. Keeping them apart means the TIFF side stays testable on ordinary
-images.
+ltb:ingest. Keeping them apart means the TIFF side stays testable on ordinary
+images -- this package imports nothing but core:bytes and core:compress/zlib,
+so its tests build in about a second and touch no projection, no hex grid and
+no window.
 */
 
-Tiff_Type :: enum u16 {
+Type :: enum u16 {
 	Byte      = 1,
 	Ascii     = 2,
 	Short     = 3,
@@ -28,7 +31,7 @@ Tiff_Type :: enum u16 {
 }
 
 @(private)
-tiff_type_size :: proc "contextless" (t: Tiff_Type) -> int {
+type_size :: proc "contextless" (t: Type) -> int {
 	switch t {
 	case .Byte, .Ascii, .SByte, .Undefined:
 		return 1
@@ -42,18 +45,18 @@ tiff_type_size :: proc "contextless" (t: Tiff_Type) -> int {
 	return 0
 }
 
-Tiff_Entry :: struct {
+Entry :: struct {
 	tag:    u16,
-	type:   Tiff_Type,
+	type:   Type,
 	count:  u32,
 	offset: u32, // file offset, or the inline value when it fits in four bytes
 	inline: bool,
 }
 
-Tiff_Reader :: struct {
+Reader :: struct {
 	data:    []byte,
 	big_end: bool,
-	entries: map[u16]Tiff_Entry,
+	entries: map[u16]Entry,
 }
 
 // Standard TIFF tags this reader understands.
@@ -81,7 +84,7 @@ COMPRESSION_PACKBITS :: 32773
 COMPRESSION_DEFLATE :: 32946
 
 @(private)
-rd_u16 :: proc "contextless" (t: ^Tiff_Reader, off: int) -> u16 {
+rd_u16 :: proc "contextless" (t: ^Reader, off: int) -> u16 {
 	if off < 0 || off + 2 > len(t.data) {
 		return 0
 	}
@@ -90,7 +93,7 @@ rd_u16 :: proc "contextless" (t: ^Tiff_Reader, off: int) -> u16 {
 }
 
 @(private)
-rd_u32 :: proc "contextless" (t: ^Tiff_Reader, off: int) -> u32 {
+rd_u32 :: proc "contextless" (t: ^Reader, off: int) -> u32 {
 	if off < 0 || off + 4 > len(t.data) {
 		return 0
 	}
@@ -102,7 +105,7 @@ rd_u32 :: proc "contextless" (t: ^Tiff_Reader, off: int) -> u32 {
 }
 
 @(private)
-rd_f64 :: proc "contextless" (t: ^Tiff_Reader, off: int) -> f64 {
+rd_f64 :: proc "contextless" (t: ^Reader, off: int) -> f64 {
 	lo := rd_u32(t, t.big_end ? off + 4 : off)
 	hi := rd_u32(t, t.big_end ? off : off + 4)
 	return transmute(f64)(u64(hi) << 32 | u64(lo))
@@ -110,7 +113,7 @@ rd_f64 :: proc "contextless" (t: ^Tiff_Reader, off: int) -> f64 {
 
 // Opens a TIFF and reads its first image file directory. Subsequent IFDs
 // (overviews, masks) are ignored: the engine builds its own pyramid.
-tiff_open :: proc(data: []byte, allocator := context.allocator) -> (t: Tiff_Reader, ok: bool) {
+open :: proc(data: []byte, allocator := context.allocator) -> (t: Reader, ok: bool) {
 	if len(data) < 8 {
 		return {}, false
 	}
@@ -132,15 +135,15 @@ tiff_open :: proc(data: []byte, allocator := context.allocator) -> (t: Tiff_Read
 	if n <= 0 || ifd + 2 + n * 12 > len(data) {
 		return {}, false
 	}
-	t.entries = make(map[u16]Tiff_Entry, n * 2, allocator)
+	t.entries = make(map[u16]Entry, n * 2, allocator)
 	for i in 0 ..< n {
 		p := ifd + 2 + i * 12
-		e := Tiff_Entry {
+		e := Entry {
 			tag   = rd_u16(&t, p),
-			type  = Tiff_Type(rd_u16(&t, p + 2)),
+			type  = Type(rd_u16(&t, p + 2)),
 			count = rd_u32(&t, p + 4),
 		}
-		size := tiff_type_size(e.type) * int(e.count)
+		size := type_size(e.type) * int(e.count)
 		if size <= 4 {
 			e.offset = u32(p + 8)
 			e.inline = true
@@ -152,24 +155,24 @@ tiff_open :: proc(data: []byte, allocator := context.allocator) -> (t: Tiff_Read
 	return t, true
 }
 
-tiff_close :: proc(t: ^Tiff_Reader) {
+close :: proc(t: ^Reader) {
 	delete(t.entries)
 	t.entries = nil
 }
 
-tiff_has :: proc(t: ^Tiff_Reader, tag: u16) -> bool {
+has :: proc(t: ^Reader, tag: u16) -> bool {
 	_, ok := t.entries[tag]
 	return ok
 }
 
 // Reads an integer-valued tag element. Returns 0 for a missing tag, which is
 // what the TIFF defaults mostly want anyway.
-tiff_int :: proc(t: ^Tiff_Reader, tag: u16, index := 0, default: u64 = 0) -> u64 {
+integer :: proc(t: ^Reader, tag: u16, index := 0, default: u64 = 0) -> u64 {
 	e, ok := t.entries[tag]
 	if !ok || index >= int(e.count) {
 		return default
 	}
-	base := int(e.offset) + index * tiff_type_size(e.type)
+	base := int(e.offset) + index * type_size(e.type)
 	switch e.type {
 	case .Byte, .Ascii, .Undefined:
 		return base < len(t.data) ? u64(t.data[base]) : default
@@ -195,19 +198,19 @@ tiff_int :: proc(t: ^Tiff_Reader, tag: u16, index := 0, default: u64 = 0) -> u64
 }
 
 // Collects an integer tag into a freshly allocated slice.
-tiff_ints :: proc(t: ^Tiff_Reader, tag: u16, allocator := context.allocator) -> []u64 {
+integers :: proc(t: ^Reader, tag: u16, allocator := context.allocator) -> []u64 {
 	e, ok := t.entries[tag]
 	if !ok {
 		return nil
 	}
 	out := make([]u64, int(e.count), allocator)
 	for i in 0 ..< int(e.count) {
-		out[i] = tiff_int(t, tag, i)
+		out[i] = integer(t, tag, i)
 	}
 	return out
 }
 
-tiff_doubles :: proc(t: ^Tiff_Reader, tag: u16, allocator := context.allocator) -> []f64 {
+doubles :: proc(t: ^Reader, tag: u16, allocator := context.allocator) -> []f64 {
 	e, ok := t.entries[tag]
 	if !ok || e.type != .Double {
 		return nil
@@ -219,7 +222,7 @@ tiff_doubles :: proc(t: ^Tiff_Reader, tag: u16, allocator := context.allocator) 
 	return out
 }
 
-tiff_ascii :: proc(t: ^Tiff_Reader, tag: u16) -> string {
+ascii :: proc(t: ^Reader, tag: u16) -> string {
 	e, ok := t.entries[tag]
 	if !ok || e.type != .Ascii {
 		return ""
@@ -243,7 +246,6 @@ tiff_ascii :: proc(t: ^Tiff_Reader, tag: u16) -> string {
 // Decompression
 // ---------------------------------------------------------------------------
 
-@(private)
 decompress_block :: proc(
 	compression: u64,
 	src: []byte,
@@ -419,7 +421,6 @@ lzw_decode :: proc(src: []byte, expected: int, allocator := context.allocator) -
 }
 
 // Undoes horizontal differencing (TIFF predictor 2) over one row.
-@(private)
 undo_predictor_row :: proc(row: []byte, samples: int, bits: int) {
 	if samples <= 0 {
 		return
@@ -446,7 +447,6 @@ undo_predictor_row :: proc(row: []byte, samples: int, bits: int) {
 
 // Byte-swaps multi-byte samples in place, for a file whose endianness differs
 // from the host's.
-@(private)
 swap_samples :: proc(buf: []byte, bytes_per_sample: int) {
 	switch bytes_per_sample {
 	case 2:

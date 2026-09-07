@@ -5,6 +5,13 @@ bookkeeping that keeps the LOD pyramid in step with whatever the systems write.
 It holds no domain state. A system carries its own layer bindings and its own
 state, so a domain is added as a file rather than as fields here.
 
+There are two kinds of state a system reads. Field data -- elevation, road
+class, soil moisture -- is one value per cell and lives in the layer store,
+indexed by axial coordinate. Anything with an identity of its own -- a crew, a
+vehicle, a fire front -- is an entity, and `entities` hands out its ids. The
+component pools holding those entities' data belong to the domain, alongside
+its other system state, for the same reason the layer bindings do.
+
 A system is three procs and a cadence:
 
 	setup   resolve layer ids, allocate state, refuse to run if a layer is absent
@@ -17,6 +24,7 @@ package sim
 
 import "core:math"
 import "core:math/rand"
+import "ltb:ecs"
 import "ltb:layers"
 import "ltb:world"
 
@@ -74,6 +82,9 @@ Sim :: struct {
 	world:         ^world.World,
 	clock:         Clock,
 	systems:       [dynamic]System,
+	// Ids and lifetimes for everything that is not one-per-cell. The pools
+	// holding their components belong to whichever system owns the domain.
+	entities:      ecs.Registry,
 	// Pyramid level the systems operate on. Coarser levels are derived.
 	level:         int,
 	rng:           rand.Generator,
@@ -93,6 +104,7 @@ init :: proc(s: ^Sim, w: ^world.World, level := 0, seed: u64 = 1, allocator := c
 	}
 	s.systems = make([dynamic]System, allocator)
 	s.dirty = make(map[layers.Layer_Id]bool, 32, allocator)
+	ecs.init(&s.entities, 256, allocator)
 	s.pyramid_every = 64
 	s.rng_state = rand.create(seed)
 	s.rng = rand.default_random_generator(&s.rng_state)
@@ -106,6 +118,8 @@ destroy :: proc(s: ^Sim) {
 	}
 	delete(s.systems)
 	delete(s.dirty)
+	// After the teardowns, so a system can still despawn its entities.
+	ecs.destroy(&s.entities)
 	s^ = {}
 }
 
@@ -123,18 +137,26 @@ add_simple_system :: proc(s: ^Sim, name: string, interval_days: f64, update: Sys
 	add_system(s, System{name = name, interval_days = interval_days, enabled = true, update = update})
 }
 
-// Runs every system's setup. A system whose setup fails -- usually because a
-// layer it needs is not registered -- is disabled rather than fatal, so a world
-// missing one dataset still runs everything else.
-//
-// Returns the number of systems that came up.
-start :: proc(s: ^Sim) -> (ready: int) {
+/*
+Runs every system's setup.
+
+A setup that fails -- usually because a layer it needs is not registered -- is
+reported through `ok`, not absorbed by disabling the system. A world that
+silently runs eleven of its twelve systems produces a result that looks like a
+simulation and is not one; the caller decides whether a missing domain is
+tolerable, and it can only decide if it is told.
+
+`failed` names the first system that did not come up.
+*/
+start :: proc(s: ^Sim) -> (ready: int, failed: string, ok: bool) {
+	ok = true
 	for &sys in s.systems {
-		if sys.setup != nil {
-			if !sys.setup(s, &sys) {
-				sys.enabled = false
-				continue
+		if sys.setup != nil && !sys.setup(s, &sys) {
+			sys.enabled = false
+			if ok {
+				failed, ok = sys.name, false
 			}
+			continue
 		}
 		if sys.update != nil {
 			sys.enabled = true

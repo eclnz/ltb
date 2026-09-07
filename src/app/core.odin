@@ -83,11 +83,15 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 	sim.init(&app.sim, &app.world, 0, opts.seed)
 	sim.add_example_systems(&app.sim)
 	app.sim.clock.days_per_tick = opts.days_per_tick
-	ready := sim.start(&app.sim)
-	for sys in app.sim.systems {
-		if !sys.enabled {
-			fmt.eprintfln("system %q disabled: no layer named %q", sys.name, sys.note)
+	ready, failed, started := sim.start(&app.sim)
+	if !started {
+		for sys in app.sim.systems {
+			if !sys.enabled {
+				fmt.eprintfln("system %q could not start: no layer named %q", sys.name, sys.note)
+			}
 		}
+		fmt.eprintfln("%d of %d systems came up; %q was the first that did not", ready, len(app.sim.systems), failed)
+		return false
 	}
 	fmt.printfln("sim: %d of %d systems ready", ready, len(app.sim.systems))
 

@@ -3,6 +3,7 @@ package ingest
 import "core:os"
 import "core:strconv"
 import geo "ltb:geo"
+import "ltb:ingest/tiff"
 import "ltb:layers"
 
 /*
@@ -87,29 +88,29 @@ parse_geotiff :: proc(
 	r: Raster,
 	err: Geotiff_Error,
 ) {
-	t, ok := tiff_open(file, context.temp_allocator)
+	t, ok := tiff.open(file, context.temp_allocator)
 	if !ok {
 		return {}, .Not_Tiff
 	}
-	defer tiff_close(&t)
+	defer tiff.close(&t)
 
-	width := int(tiff_int(&t, TAG_IMAGE_WIDTH))
-	height := int(tiff_int(&t, TAG_IMAGE_LENGTH))
+	width := int(tiff.integer(&t, tiff.TAG_IMAGE_WIDTH))
+	height := int(tiff.integer(&t, tiff.TAG_IMAGE_LENGTH))
 	if width <= 0 || height <= 0 {
 		return {}, .Unsupported_Layout
 	}
 
-	samples := int(tiff_int(&t, TAG_SAMPLES_PER_PIXEL, 0, 1))
-	bits := int(tiff_int(&t, TAG_BITS_PER_SAMPLE, 0, 8))
-	format := int(tiff_int(&t, TAG_SAMPLE_FORMAT, 0, 1)) // 1 uint, 2 int, 3 float
-	planar := int(tiff_int(&t, TAG_PLANAR_CONFIG, 0, 1)) // 1 chunky, 2 planar
-	compression := tiff_int(&t, TAG_COMPRESSION, 0, COMPRESSION_NONE)
-	predictor := int(tiff_int(&t, TAG_PREDICTOR, 0, 1))
+	samples := int(tiff.integer(&t, tiff.TAG_SAMPLES_PER_PIXEL, 0, 1))
+	bits := int(tiff.integer(&t, tiff.TAG_BITS_PER_SAMPLE, 0, 8))
+	format := int(tiff.integer(&t, tiff.TAG_SAMPLE_FORMAT, 0, 1)) // 1 uint, 2 int, 3 float
+	planar := int(tiff.integer(&t, tiff.TAG_PLANAR_CONFIG, 0, 1)) // 1 chunky, 2 planar
+	compression := tiff.integer(&t, tiff.TAG_COMPRESSION, 0, tiff.COMPRESSION_NONE)
+	predictor := int(tiff.integer(&t, tiff.TAG_PREDICTOR, 0, 1))
 
 	// Mixed bit depths across bands would need a per-band raster; reject rather
 	// than silently reading the first band's depth for all of them.
 	for i in 1 ..< samples {
-		if int(tiff_int(&t, TAG_BITS_PER_SAMPLE, i, u64(bits))) != bits {
+		if int(tiff.integer(&t, tiff.TAG_BITS_PER_SAMPLE, i, u64(bits))) != bits {
 			return {}, .Unsupported_Sample
 		}
 	}
@@ -121,19 +122,19 @@ parse_geotiff :: proc(
 	esz := layers.element_size(kind)
 
 	// Pixel layout: tiled or stripped.
-	tiled := tiff_has(&t, TAG_TILE_WIDTH)
+	tiled := tiff.has(&t, tiff.TAG_TILE_WIDTH)
 	tile_w, tile_h: int
 	offsets, counts: []u64
 	if tiled {
-		tile_w = int(tiff_int(&t, TAG_TILE_WIDTH))
-		tile_h = int(tiff_int(&t, TAG_TILE_LENGTH))
-		offsets = tiff_ints(&t, TAG_TILE_OFFSETS, context.temp_allocator)
-		counts = tiff_ints(&t, TAG_TILE_BYTE_COUNTS, context.temp_allocator)
+		tile_w = int(tiff.integer(&t, tiff.TAG_TILE_WIDTH))
+		tile_h = int(tiff.integer(&t, tiff.TAG_TILE_LENGTH))
+		offsets = tiff.integers(&t, tiff.TAG_TILE_OFFSETS, context.temp_allocator)
+		counts = tiff.integers(&t, tiff.TAG_TILE_BYTE_COUNTS, context.temp_allocator)
 	} else {
 		tile_w = width
-		tile_h = int(tiff_int(&t, TAG_ROWS_PER_STRIP, 0, u64(height)))
-		offsets = tiff_ints(&t, TAG_STRIP_OFFSETS, context.temp_allocator)
-		counts = tiff_ints(&t, TAG_STRIP_BYTE_COUNTS, context.temp_allocator)
+		tile_h = int(tiff.integer(&t, tiff.TAG_ROWS_PER_STRIP, 0, u64(height)))
+		offsets = tiff.integers(&t, tiff.TAG_STRIP_OFFSETS, context.temp_allocator)
+		counts = tiff.integers(&t, tiff.TAG_STRIP_BYTE_COUNTS, context.temp_allocator)
 	}
 	defer delete(offsets, context.temp_allocator)
 	defer delete(counts, context.temp_allocator)
@@ -170,7 +171,7 @@ parse_geotiff :: proc(
 					continue // a sparse tile: leave the destination zeroed
 				}
 
-				raw, dok := decompress_block(compression, file[off:off + cnt], block_bytes, context.temp_allocator)
+				raw, dok := tiff.decompress_block(compression, file[off:off + cnt], block_bytes, context.temp_allocator)
 				if !dok {
 					delete(out, allocator)
 					return {}, .Decompression_Failed
@@ -190,10 +191,10 @@ parse_geotiff :: proc(
 					}
 					line := raw[src_off:src_off + row_bytes]
 					if need_swap {
-						swap_samples(line, esz)
+						tiff.swap_samples(line, esz)
 					}
 					if predictor == 2 {
-						undo_predictor_row(line, per_plane_samples, bits)
+						tiff.undo_predictor_row(line, per_plane_samples, bits)
 					}
 
 					y := ty * tile_h + row
@@ -236,7 +237,7 @@ parse_geotiff :: proc(
 
 	nodata := 0.0
 	has_nodata := false
-	if s := tiff_ascii(&t, TAG_GDAL_NODATA); len(s) > 0 {
+	if s := tiff.ascii(&t, TAG_GDAL_NODATA); len(s) > 0 {
 		if v, parsed := strconv.parse_f64(s); parsed {
 			nodata = v
 			has_nodata = true
@@ -321,15 +322,15 @@ element_kind_for :: proc "contextless" (bits, format: int) -> (layers.Element_Ki
 // ---------------------------------------------------------------------------
 
 @(private)
-geotiff_transform :: proc(t: ^Tiff_Reader) -> (Affine, bool) {
-	if m := tiff_doubles(t, TAG_MODEL_TRANSFORMATION, context.temp_allocator); len(m) >= 16 {
+geotiff_transform :: proc(t: ^tiff.Reader) -> (Affine, bool) {
+	if m := tiff.doubles(t, TAG_MODEL_TRANSFORMATION, context.temp_allocator); len(m) >= 16 {
 		defer delete(m, context.temp_allocator)
 		// Row-major 4x4; the engine only uses the 2D part.
 		return Affine{a = m[0], b = m[1], c = m[3], d = m[4], e = m[5], f = m[7]}, true
 	}
 
-	scale := tiff_doubles(t, TAG_MODEL_PIXEL_SCALE, context.temp_allocator)
-	tie := tiff_doubles(t, TAG_MODEL_TIEPOINT, context.temp_allocator)
+	scale := tiff.doubles(t, TAG_MODEL_PIXEL_SCALE, context.temp_allocator)
+	tie := tiff.doubles(t, TAG_MODEL_TIEPOINT, context.temp_allocator)
 	defer delete(scale, context.temp_allocator)
 	defer delete(tie, context.temp_allocator)
 	if len(scale) < 2 || len(tie) < 6 {
@@ -350,15 +351,15 @@ Geo_Keys :: struct {
 }
 
 @(private)
-read_geo_keys :: proc(t: ^Tiff_Reader, allocator := context.temp_allocator) -> (k: Geo_Keys, ok: bool) {
+read_geo_keys :: proc(t: ^tiff.Reader, allocator := context.temp_allocator) -> (k: Geo_Keys, ok: bool) {
 	e, has := t.entries[TAG_GEO_KEY_DIRECTORY]
 	if !has || e.count < 4 {
 		return {}, false
 	}
-	params := tiff_doubles(t, TAG_GEO_DOUBLE_PARAMS, allocator)
+	params := tiff.doubles(t, TAG_GEO_DOUBLE_PARAMS, allocator)
 	defer delete(params, allocator)
 
-	n := int(tiff_int(t, TAG_GEO_KEY_DIRECTORY, 3))
+	n := int(tiff.integer(t, TAG_GEO_KEY_DIRECTORY, 3))
 	if n <= 0 || 4 + n * 4 > int(e.count) {
 		return {}, false
 	}
@@ -366,9 +367,9 @@ read_geo_keys :: proc(t: ^Tiff_Reader, allocator := context.temp_allocator) -> (
 	k.doubles = make(map[u16]f64, n * 2, allocator)
 	for i in 0 ..< n {
 		base := 4 + i * 4
-		key := u16(tiff_int(t, TAG_GEO_KEY_DIRECTORY, base))
-		loc := u16(tiff_int(t, TAG_GEO_KEY_DIRECTORY, base + 1))
-		value := u16(tiff_int(t, TAG_GEO_KEY_DIRECTORY, base + 3))
+		key := u16(tiff.integer(t, TAG_GEO_KEY_DIRECTORY, base))
+		loc := u16(tiff.integer(t, TAG_GEO_KEY_DIRECTORY, base + 1))
+		value := u16(tiff.integer(t, TAG_GEO_KEY_DIRECTORY, base + 3))
 		switch loc {
 		case 0:
 			k.shorts[key] = value
@@ -400,7 +401,7 @@ key_double :: proc(k: ^Geo_Keys, id: u16, default: f64 = 0) -> f64 {
 // EPSG codes are matched for the families that cover most published data, and a
 // user-defined projection is rebuilt from its GeoTIFF parameters. Anything else
 // returns .Unknown_Crs; pass `crs_override` to place the raster by hand.
-geotiff_projection :: proc(t: ^Tiff_Reader) -> (geo.Projection, Geotiff_Error) {
+geotiff_projection :: proc(t: ^tiff.Reader) -> (geo.Projection, Geotiff_Error) {
 	keys, ok := read_geo_keys(t, context.temp_allocator)
 	if !ok {
 		// No GeoTIFF keys at all. A plain TIFF with a tiepoint is almost always
