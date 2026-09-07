@@ -29,6 +29,8 @@ Options :: struct {
 	no_generate:  bool,
 	// Render a scripted set of frames to this directory and exit.
 	shots_dir:    string,
+	// Which scripted set to render: "wide" or "close".
+	shots_set:    string,
 	// Window size for the interactive mode.
 	width, height: int,
 	print_layers: bool,
@@ -68,6 +70,7 @@ usage: ltb [options]
   --layers PATH         register extra layer declarations from a JSON file
   --no-generate         skip procedural generation; use only ingested data
   --shots DIR           render a scripted set of frames to DIR and exit
+  --shot-set NAME       which set: wide (default) or close
   --width N --height N  window size
   --list-layers         print the layer catalogue and exit
   --help                this message
@@ -142,6 +145,8 @@ parse_options :: proc() -> (o: Options, ok: bool) {
 			o.no_generate = true
 		case "--shots":
 			o.shots_dir = next_value(args, &i, a) or_return
+		case "--shot-set":
+			o.shots_set = next_value(args, &i, a) or_return
 		case "--width":
 			v := next_value(args, &i, a) or_return
 			o.width = strconv.parse_int(v) or_else o.width

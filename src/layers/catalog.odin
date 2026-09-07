@@ -6,9 +6,9 @@ The standard layer catalogue.
 Every entry here is an ordinary `Layer_Desc` that could equally have come from a
 manifest file. Between them they cover every semantic the engine supports.
 
-The integer types and scales are chosen for storage cost: elevation as i16
-decimetres is 2 bytes a cell and still resolves terrain to 10 cm, against 4
-bytes for f32.
+The integer types and scales are chosen for storage cost, and their ranges have
+to cover the real world: elevation as i16 quarter-metres is 2 bytes a cell,
+resolves to 25 cm, and still spans -8191 to 8191 m.
 */
 
 NAN :: f64(0h7ff8_0000_0000_0000)
@@ -21,6 +21,14 @@ NODATA_U16 :: 65535.0
 NODATA_I16 :: -32768.0
 NODATA_U32 :: 4294967295.0
 NODATA_I32 :: -2147483648.0
+
+// Registers a layer whose values span orders of magnitude.
+@(private)
+register_log :: proc(r: ^Registry, desc: Layer_Desc) -> (Layer_Id, bool) {
+	d := desc
+	d.display = .Log
+	return register(r, d)
+}
 
 @(private)
 scalar_layer :: proc(
@@ -297,10 +305,10 @@ register_standard_layers :: proc(r: ^Registry) {
 }
 
 register_terrain_layers :: proc(r: ^Registry) {
-	// Elevation in decimetres: +-3276 m at 10 cm resolution, in two bytes.
-	e := scalar_layer("terrain.elevation", "terrain", "m", .I16, 0.1, 0, -500, 4000, PALETTE_TERRAIN, .Mean,
-		"Height of the ground surface above the geoid.")
-	register(r, e)
+	// Elevation in quarter-metres: +-8191 m at 25 cm resolution, in two bytes,
+	// which spans the Dead Sea shore to the summit of Everest.
+	register(r, scalar_layer("terrain.elevation", "terrain", "m", .I16, 0.25, 0, -500, 8000, PALETTE_TERRAIN, .Mean,
+		"Height of the ground surface above the geoid."))
 
 	register(r, scalar_layer("terrain.slope", "terrain", "degrees", .U8, 90.0 / 254.0, 0, 0, 90, PALETTE_HEAT, .Mean,
 		"Steepness of the surface. Drives access cost, erosion and fire spread."))
@@ -323,9 +331,9 @@ register_hydrology_layers :: proc(r: ^Registry) {
 		"Standing water depth. Zero on dry land."))
 	register(r, boolean_layer("water.permanent", "hydrology",
 		"Set where water is present year-round: lakes, sea, perennial rivers."))
-	register(r, scalar_layer("water.discharge", "hydrology", "m3/s", .F32, 1, 0, 0, 5000, PALETTE_BLUES, .Sum,
+	register_log(r, scalar_layer("water.discharge", "hydrology", "m3/s", .F32, 1, 0, 0, 5000, PALETTE_BLUES, .Sum,
 		"Channel discharge. Sums downstream, so it aggregates by sum."))
-	register(r, scalar_layer("water.flow_accumulation", "hydrology", "cells", .U32, 1, 0, 0, 1e7, PALETTE_BLUES, .Sum,
+	register_log(r, scalar_layer("water.flow_accumulation", "hydrology", "cells", .U32, 1, 0, 0, 1e7, PALETTE_BLUES, .Sum,
 		"Upstream contributing cell count, the usual basis for extracting a stream network."))
 	register(r, direction_layer("water.flow_direction", "hydrology",
 		"Direction of steepest descent, used to route surface flow between cells."))
@@ -459,7 +467,7 @@ register_disturbance_layers :: proc(r: ^Registry) {
 		"Fine fuel moisture content, the single strongest control on ignition."))
 	register(r, categorical_layer("fire.state", "disturbance", FIRE_STATE_CLASSES[:],
 		"Current fire state of the cell."))
-	register(r, scalar_layer("fire.intensity", "disturbance", "kW/m", .U16, 2, 0, 0, 100000, PALETTE_HEAT, .Max,
+	register_log(r, scalar_layer("fire.intensity", "disturbance", "kW/m", .U16, 2, 0, 0, 100000, PALETTE_HEAT, .Max,
 		"Fireline intensity. Aggregates by maximum, because a coarse cell containing a crown fire is a crown fire."))
 	register(r, scalar_layer("fire.years_since_burn", "disturbance", "years", .U16, 1, 0, 0, 2000, PALETTE_HEAT, .Min,
 		"Time since the last fire."))
@@ -489,7 +497,7 @@ register_fauna_layers :: proc(r: ^Registry) {
 }
 
 register_human_layers :: proc(r: ^Registry) {
-	register(r, density_layer("human.population_density", "human", "people/km2", .U16, 0.5, 0, 30000, PALETTE_HEAT,
+	register_log(r, density_layer("human.population_density", "human", "people/km2", .U16, 0.5, 0, 30000, PALETTE_HEAT,
 		"Resident population per square kilometre."))
 	register(r, fraction_layer("human.built_up", "human", PALETTE_HEAT,
 		"Fraction of the cell under buildings and sealed surface."))
@@ -507,7 +515,7 @@ register_human_layers :: proc(r: ^Registry) {
 		"Who holds the cell."))
 	register(r, scalar_layer("human.admin_id", "human", "id", .U32, 1, 0, 0, 4e9, PALETTE_CATEGORICAL, .Majority,
 		"Administrative region identifier, for reporting and rules that vary by jurisdiction."))
-	register(r, scalar_layer("human.land_value", "human", "currency/ha", .U32, 1, 0, 0, 1e8, PALETTE_HEAT, .Mean,
+	register_log(r, scalar_layer("human.land_value", "human", "currency/ha", .U32, 1, 0, 0, 1e8, PALETTE_HEAT, .Mean,
 		"Market land value."))
 	register(r, fraction_layer("human.recreation_value", "human", PALETTE_VIRIDIS,
 		"Amenity and recreation value of the cell."))

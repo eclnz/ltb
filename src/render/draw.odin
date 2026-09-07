@@ -182,8 +182,10 @@ draw_layer :: proc(r: ^Renderer, w: ^world.World, cam: ^Camera, view: View) -> (
 			} else if desc.semantic == .Categorical || desc.semantic == .Boolean {
 				rgb = layers.value_color(desc, value)
 			} else {
-				t := span > 0 ? (value - stats.range_lo) / span : 0
-				rgb = layers.palette_sample(desc.palette, t)
+				rgb = layers.palette_sample(
+					desc.palette,
+					layers.palette_position(desc, value, stats.range_lo, stats.range_hi),
+				)
 			}
 
 			if view.shade_strength > 0 && has_shade {
@@ -256,13 +258,17 @@ draw_legend :: proc(
 	case:
 		bar_h := i32(14)
 		for i in 0 ..< width {
-			t := f64(i) / f64(max(1, width - 1))
-			c := layers.palette_sample(desc.palette, t)
+			// The bar is drawn in value space, so a log layer's ramp shows
+			// where its values actually land.
+			v := lo + (hi - lo) * f64(i) / f64(max(1, width - 1))
+			c := layers.palette_sample(desc.palette, layers.palette_position(desc, v, lo, hi))
 			rl.DrawRectangle(x + i, cy, 1, bar_h, rl.Color{c.r, c.g, c.b, 255})
 		}
 		cy += bar_h + 3
 		lo_text := fmt.ctprintf("%.4g", lo)
-		hi_text := fmt.ctprintf("%.4g %s", hi, desc.unit)
+		hi_text := desc.display == .Linear \
+			? fmt.ctprintf("%.4g %s", hi, desc.unit) \
+			: fmt.ctprintf("%.4g %s (%v)", hi, desc.unit, desc.display)
 		rl.DrawText(lo_text, x, cy, 12, rl.LIGHTGRAY)
 		rl.DrawText(hi_text, x + width - rl.MeasureText(hi_text, 12), cy, 12, rl.LIGHTGRAY)
 		cy += 16

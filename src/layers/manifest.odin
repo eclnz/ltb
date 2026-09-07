@@ -134,6 +134,14 @@ layer_from_json :: proc(obj: json.Object, allocator := context.allocator) -> (d:
 	d.max_value = json_number(obj, "max", 1)
 	d.components = u8(clamp(int(json_number(obj, "components", 1)), 1, 255))
 	d.interp = json_string(obj, "interpolate", "linear") == "nearest" ? .Nearest : .Linear
+	switch json_string(obj, "display", "linear") {
+	case "log":
+		d.display = .Log
+	case "sqrt":
+		d.display = .Sqrt
+	case:
+		d.display = .Linear
+	}
 
 	if agg := json_string(obj, "aggregate"); len(agg) > 0 {
 		d.aggregate = aggregate_from_name(agg)

@@ -49,3 +49,16 @@ NE_WATER_CLASSES := [?]Class_Rule {
 	{"River", 0},
 	{"Ferry Route", 0},
 }
+
+// Carriageway width in metres by the same `type` values, for rasterising a
+// centreline as a band rather than a line.
+@(rodata)
+NE_ROAD_WIDTHS := [?]Class_Rule {
+	{"Major Highway", 36},
+	{"Beltway", 30},
+	{"Bypass", 24},
+	{"Secondary Highway", 20},
+	{"Road", 12},
+	{"Unknown", 10},
+	{"Track", 5},
+}

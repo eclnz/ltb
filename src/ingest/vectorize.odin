@@ -100,6 +100,13 @@ Vector_Options :: struct {
 	// natural unit of a measure into the layer's: `.Density` accumulates metres
 	// per square kilometre, so a layer in km/km2 wants 0.001.
 	unit_scale: f64,
+	// Ground width of a line feature in metres. A centreline with a width marks
+	// every cell within half of it, which is what makes a motorway thirty cells
+	// wide on a one-metre grid instead of one.
+	//
+	// Applies to `.Presence`, `.Value` and `.Coverage`. `.Density` stays
+	// centreline-based, since length per unit area is already what it measures.
+	width: Value_Source,
 	max_cells: int,
 }
 
@@ -111,6 +118,8 @@ Vector_Result :: struct {
 	// Outside the world.
 	features_outside: int,
 	line_metres:      f64,
+	// Widest line feature rasterised, in metres. Zero means centrelines only.
+	max_width:        f64,
 }
 
 // Resamples `fc` onto `w`'s hex grid and writes it into `layer`.
@@ -146,6 +155,9 @@ vectorize :: proc(
 	}
 	if o.unit_scale == 0 {
 		o.unit_scale = 1
+	}
+	if o.width.scale == 0 {
+		o.width.scale = 1
 	}
 
 	rule := o.rule
@@ -219,6 +231,12 @@ vectorize :: proc(
 			}
 
 		case .Line:
+			width := 0.0
+			if o.width.kind != .Constant || o.width.constant != 0 {
+				w, has_width := feature_value(f, o.width)
+				width = has_width ? w : 0
+			}
+			res.max_width = math.max(res.max_width, width)
 			for r in feature_rings(fc, f) {
 				if r.count < 2 {
 					continue
@@ -235,6 +253,7 @@ vectorize :: proc(
 						v,
 						cell_area_km2,
 						o.unit_scale,
+						width,
 						&value_buf,
 					)
 				}
@@ -364,7 +383,7 @@ walk_segment :: proc(
 	p0, p1: geo.Point,
 	step: f64,
 	measure: Measure,
-	value, cell_area_km2, unit_scale: f64,
+	value, cell_area_km2, unit_scale, width: f64,
 	buf: ^[1]f64,
 ) -> (
 	length: f64,
@@ -378,13 +397,16 @@ walk_segment :: proc(
 	steps := max(1, int(math.ceil(length / step)))
 	seg_len := length / f64(steps)
 
+	// Cells to reach out from the centreline to cover the feature's width.
+	half := width * 0.5
+	pitch := hex.cell_pitch(lay)
+	rings := (measure == .Density || half <= pitch * 0.5) ? 0 : int(math.ceil(half / pitch))
+
 	for i in 0 ..< steps {
 		t := (f64(i) + 0.5) / f64(steps)
 		mid := geo.Point{p0.x + dx * t, p0.y + dy * t}
 		h := hex.world_to_hex(lay, mid)
-		if !hex.bounds_contains(bounds, h) {
-			continue
-		}
+
 		switch measure {
 		case .Presence, .Count:
 			buf[0] = 1
@@ -393,9 +415,45 @@ walk_segment :: proc(
 		case .Value, .Coverage:
 			buf[0] = value
 		}
-		layers.accum_add(a, h, buf[:])
+
+		if rings == 0 {
+			if hex.bounds_contains(bounds, h) {
+				layers.accum_add(a, h, buf[:])
+			}
+			continue
+		}
+
+		// Cells whose centre is within half the width of the segment itself,
+		// measured to the segment rather than to this step, so the band has
+		// square ends and an even edge.
+		for dq in -i32(rings) ..= i32(rings) {
+			for dr in -i32(rings) ..= i32(rings) {
+				c := hex.Hex{h.q + dq, h.r + dr}
+				if hex.distance(h, c) > i32(rings) || !hex.bounds_contains(bounds, c) {
+					continue
+				}
+				if point_segment_distance(hex.to_world(lay, c), p0, p1) > half {
+					continue
+				}
+				layers.accum_add(a, c, buf[:])
+			}
+		}
 	}
 	return
+}
+
+@(private)
+point_segment_distance :: proc "contextless" (p, a, b: geo.Point) -> f64 {
+	abx := b.x - a.x
+	aby := b.y - a.y
+	len2 := abx * abx + aby * aby
+	t := 0.0
+	if len2 > 0 {
+		t = clamp(((p.x - a.x) * abx + (p.y - a.y) * aby) / len2, 0, 1)
+	}
+	dx := p.x - (a.x + abx * t)
+	dy := p.y - (a.y + aby * t)
+	return math.sqrt(dx * dx + dy * dy)
 }
 
 // Fills the cells a polygon covers, by scanline.

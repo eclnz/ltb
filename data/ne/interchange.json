@@ -1,0 +1,36 @@
+{
+  "layers": [
+    {
+      "name": "logistics.haul_speed",
+      "group": "logistics",
+      "unit": "km/h",
+      "description": "free-flow speed of the fastest road in the cell",
+      "type": "u8", "scale": 0.5,
+      "semantic": "scalar", "aggregate": "max",
+      "min": 0, "max": 120,
+      "palette": "viridis"
+    }
+  ],
+
+  "sources": [
+    { "path": "n43.tif", "layer": "terrain.elevation", "resample": "linear" },
+
+    { "path": "ne_10m_roads.geojson", "layer": "human.road_class",
+      "measure": "value", "rule": "max",
+      "value": { "classify": "type", "table": "ne_road" },
+      "width_m": { "classify": "type", "table": "ne_road_width" },
+      "filter": [ { "key": "type", "not": ["Ferry Route", "Ferry, seasonal"] } ] },
+
+    { "path": "ne_10m_roads.geojson", "layer": "logistics.haul_speed",
+      "measure": "value", "rule": "max",
+      "value": { "classify": "type", "table": "ne_road_speed" },
+      "width_m": { "classify": "type", "table": "ne_road_width" },
+      "filter": [ { "key": "type", "not": ["Ferry Route", "Ferry, seasonal"] } ] },
+
+    { "path": "ne_10m_roads.geojson", "layer": "human.road_density",
+      "measure": "density", "value": { "constant": 1 }, "unit_scale": 0.001,
+      "filter": [ { "key": "type", "not": ["Ferry Route", "Ferry, seasonal"] } ] }
+  ],
+
+  "build_pyramid": true
+}

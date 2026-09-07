@@ -1,0 +1,6 @@
+{
+  "sources": [
+    { "path": "srtm90.tif", "layer": "terrain.elevation", "resample": "auto" }
+  ],
+  "build_pyramid": false
+}

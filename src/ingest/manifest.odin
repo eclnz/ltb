@@ -75,6 +75,8 @@ Manifest_Report :: struct {
 manifest_report_destroy :: proc(r: ^Manifest_Report, allocator := context.allocator) {
 	for s in r.sources {
 		delete(s.message, allocator)
+		delete(s.path, allocator)
+		delete(s.layer, allocator)
 	}
 	delete(r.sources, allocator)
 	r^ = {}
@@ -185,8 +187,10 @@ load_source_entry :: proc(
 ) {
 	rel := layers.json_string(obj, "path")
 	layer_name := layers.json_string(obj, "layer")
-	rep.path = rel
-	rep.layer = layer_name
+	// Cloned, because these point into the parsed manifest, which is freed
+	// before the report is read.
+	rep.path = strings.clone(rel, allocator)
+	rep.layer = strings.clone(layer_name, allocator)
 
 	if len(rel) == 0 || len(layer_name) == 0 {
 		rep.message = strings.clone("a source needs both \"path\" and \"layer\"", allocator)
@@ -368,6 +372,7 @@ load_vector_entry :: proc(
 		line_step_fraction = layers.json_number(obj, "line_step", 0.25),
 		unit_scale         = layers.json_number(obj, "unit_scale", 1),
 	}
+	opts.width = width_source_from_json(obj, allocator)
 	if layers.json_string(obj, "rule") == "" {
 		opts.rule = .None // let the measure or the layer decide
 	}
@@ -385,13 +390,14 @@ load_vector_entry :: proc(
 	rep.ok = true
 	rep.cells_written = res.cells_written
 	rep.message = fmt.aprintf(
-		"%d point / %d line / %d polygon, %d used / %d filtered / %d outside -> %d cells",
+		"%d pt / %d line / %d poly, %d used / %d filtered / %d outside, width %.0f m -> %d cells",
 		points,
 		lines,
 		polys,
 		res.features_used,
 		res.features_skipped,
 		res.features_outside,
+		res.max_width,
 		res.cells_written,
 		allocator = allocator,
 	)
@@ -411,7 +417,11 @@ value_source_from_json :: proc(obj: json.Object, allocator := context.allocator)
 		}
 		return constant_value(1)
 	}
+	return value_source_from_object(vo, allocator)
+}
 
+@(private)
+value_source_from_object :: proc(vo: json.Object, allocator := context.allocator) -> Value_Source {
 	if _, has_const := vo["constant"]; has_const {
 		return constant_value(layers.json_number(vo, "constant", 1))
 	}
@@ -438,6 +448,22 @@ value_source_from_json :: proc(obj: json.Object, allocator := context.allocator)
 	return constant_value(1)
 }
 
+// "width_m": 30, or "width_m": { "classify": "type", "table": "ne_road_width" }
+@(private)
+width_source_from_json :: proc(obj: json.Object, allocator := context.allocator) -> Value_Source {
+	v, has := obj["width_m"]
+	if !has {
+		return constant_value(0)
+	}
+	if n, is_num := layers.json_value_number(v); is_num {
+		return constant_value(n)
+	}
+	if vo, is_obj := v.(json.Object); is_obj {
+		return value_source_from_object(vo, allocator)
+	}
+	return constant_value(0)
+}
+
 @(private)
 named_class_table :: proc(name: string) -> []Class_Rule {
 	switch name {
@@ -455,6 +481,10 @@ named_class_table :: proc(name: string) -> []Class_Rule {
 		return NE_ROAD_SPEEDS[:]
 	case "ne_water":
 		return NE_WATER_CLASSES[:]
+	case "ne_road_width":
+		return NE_ROAD_WIDTHS[:]
+	case "osm_highway_width":
+		return OSM_HIGHWAY_WIDTHS[:]
 	}
 	return nil
 }

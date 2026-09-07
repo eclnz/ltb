@@ -215,3 +215,25 @@ ingest_osm_landcover :: proc(
 	}
 	return res, .None
 }
+
+// Carriageway width in metres by `highway` value.
+@(rodata)
+OSM_HIGHWAY_WIDTHS := [?]Class_Rule {
+	{"motorway", 32},
+	{"motorway_link", 12},
+	{"trunk", 22},
+	{"trunk_link", 10},
+	{"primary", 18},
+	{"primary_link", 9},
+	{"secondary", 14},
+	{"secondary_link", 8},
+	{"tertiary", 11},
+	{"tertiary_link", 7},
+	{"unclassified", 8},
+	{"residential", 8},
+	{"living_street", 6},
+	{"service", 5},
+	{"track", 4},
+	{"path", 2},
+	{"footway", 2},
+}

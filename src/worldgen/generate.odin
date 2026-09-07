@@ -25,6 +25,9 @@ Params :: struct {
 	// Multiplies the whole precipitation field.
 	wetness:           f64,
 	build_pyramid:     bool,
+	// Keep the elevation already present and model only what follows from it.
+	// Set when a real DEM has been ingested.
+	use_existing_elevation: bool,
 }
 
 default_params :: proc() -> Params {
@@ -123,41 +126,21 @@ generate :: proc(w: ^world.World, p: Params, bounds: Maybe(hex.Bounds) = nil) ->
 	inv_scale := 1.0 / math.max(1.0, terrain_scale)
 
 	// ---- terrain -------------------------------------------------------
-	// Domain warping first: it turns the noise's obvious grid alignment into
-	// something that reads as geology.
-	for r in region.r0 ..= region.r1 {
-		for q in region.q0 ..= region.q1 {
-			h := hex.Hex{q, r}
-			wp := hex.to_world(lay, h)
-			x := wp.x * inv_scale
-			y := wp.y * inv_scale
-
-			wx := x + 0.55 * fbm(&warp_noise, x * 0.7 + 11.3, y * 0.7 - 4.1, 4)
-			wy := y + 0.55 * fbm(&warp_noise, x * 0.7 - 7.9, y * 0.7 + 2.7, 4)
-
-			continent := fbm(&elev_noise, wx * 0.35, wy * 0.35, 5)
-			mountains := ridged(&elev_noise, wx * 1.15 + 31.0, wy * 1.15 - 17.0, 6)
-			detail := fbm(&detail_noise, wx * 4.0, wy * 4.0, 4)
-
-			// Shift the continent field so about `land_fraction` of it is
-			// positive, then let the ridged field pile mountains onto land only.
-			land := continent + (p.land_fraction - 0.5) * 1.6
-			height: f64
-			if land <= 0 {
-				height = land * 900.0 // shelf and ocean floor
-			} else {
-				uplift := math.pow(math.min(1.0, land * 1.9), 1.35)
-				height = uplift * (0.35 + 0.65 * mountains) * p.max_elevation
-				height += detail * 45.0 * uplift
-			}
-			height += p.sea_level
-
-			layers.set(w.store, ids.elevation, lvl, h, height)
-			stats.cells += 1
-			if height > p.sea_level {
-				stats.land_cells += 1
+	if p.use_existing_elevation {
+		for r in region.r0 ..= region.r1 {
+			for q in region.q0 ..= region.q1 {
+				elev, has := layers.get(w.store, ids.elevation, lvl, hex.Hex{q, r})
+				if !has {
+					continue
+				}
+				stats.cells += 1
+				if elev > p.sea_level {
+					stats.land_cells += 1
+				}
 			}
 		}
+	} else {
+		generate_terrain(w, ids, p, region, lvl, lay, inv_scale, &elev_noise, &warp_noise, &detail_noise, &stats)
 	}
 
 	ingest.derive_slope_aspect(w, ids.elevation, ids.slope, ids.aspect, p.level, region)
@@ -667,4 +650,57 @@ derive_distance_to_water :: proc(w: ^world.World, ids: Layer_Ids, region: hex.Bo
 	for h, d in dist {
 		layers.set(w.store, ids.distance_to_water, lvl, h, f64(d) * pitch)
 	}
+}
+
+
+// Fractal terrain: a warped continent field with ridged mountains raised on
+// the land and fine detail on top.
+@(private)
+generate_terrain :: proc(
+	w: ^world.World,
+	ids: Layer_Ids,
+	p: Params,
+	region: hex.Bounds,
+	lvl: u8,
+	lay: hex.Layout,
+	inv_scale: f64,
+	elev_noise, warp_noise, detail_noise: ^Noise,
+	stats: ^Stats,
+) {
+	// Domain warping first: it turns the noise's grid alignment into something
+	// that reads as geology.
+		for r in region.r0 ..= region.r1 {
+			for q in region.q0 ..= region.q1 {
+				h := hex.Hex{q, r}
+				wp := hex.to_world(lay, h)
+				x := wp.x * inv_scale
+				y := wp.y * inv_scale
+
+				wx := x + 0.55 * fbm(warp_noise, x * 0.7 + 11.3, y * 0.7 - 4.1, 4)
+				wy := y + 0.55 * fbm(warp_noise, x * 0.7 - 7.9, y * 0.7 + 2.7, 4)
+
+				continent := fbm(elev_noise, wx * 0.35, wy * 0.35, 5)
+				mountains := ridged(elev_noise, wx * 1.15 + 31.0, wy * 1.15 - 17.0, 6)
+				detail := fbm(detail_noise, wx * 4.0, wy * 4.0, 4)
+
+				// Shift the continent field so about `land_fraction` of it is
+				// positive, then let the ridged field pile mountains onto land only.
+				land := continent + (p.land_fraction - 0.5) * 1.6
+				height: f64
+				if land <= 0 {
+					height = land * 900.0 // shelf and ocean floor
+				} else {
+					uplift := math.pow(math.min(1.0, land * 1.9), 1.35)
+					height = uplift * (0.35 + 0.65 * mountains) * p.max_elevation
+					height += detail * 45.0 * uplift
+				}
+				height += p.sea_level
+
+				layers.set(w.store, ids.elevation, lvl, h, height)
+				stats.cells += 1
+				if height > p.sea_level {
+					stats.land_cells += 1
+				}
+			}
+		}
 }

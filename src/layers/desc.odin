@@ -10,6 +10,8 @@ stored (element type, component count, linear scale/offset), what they mean
 */
 package layers
 
+import "core:math"
+
 // How a single component is stored in a chunk buffer.
 Element_Kind :: enum u8 {
 	U8,
@@ -62,6 +64,15 @@ Aggregate :: enum u8 {
 	None,             // do not build coarser levels; caller fills them
 }
 
+// How a value is positioned along its palette. Quantities that span orders of
+// magnitude -- drainage area, population, land value -- are unreadable on a
+// linear ramp.
+Value_Scale :: enum u8 {
+	Linear,
+	Log,  // log10(1 + v) normalised over the range
+	Sqrt,
+}
+
 // How values are read between cell centres.
 Interpolation :: enum u8 {
 	Nearest,
@@ -109,6 +120,7 @@ Layer_Desc :: struct {
 	semantic:    Semantic,
 	aggregate:   Aggregate,
 	interp:      Interpolation,
+	display:     Value_Scale,
 
 	scale:       f64,
 	offset:      f64,
@@ -202,6 +214,25 @@ encode_storable :: proc "contextless" (d: ^Layer_Desc, v: f64) -> (raw: f64, sat
 		return hi, true
 	}
 	return raw, false
+}
+
+// Where a value sits along its palette, in 0..1, honouring the display scale.
+palette_position :: proc "contextless" (d: ^Layer_Desc, value, lo, hi: f64) -> f64 {
+	if hi <= lo {
+		return 0
+	}
+	switch d.display {
+	case .Log:
+		// Shifted so a zero value maps to zero rather than negative infinity.
+		base := math.max(0.0, -lo)
+		num := math.ln(1.0 + math.max(0.0, value + base))
+		den := math.ln(1.0 + math.max(1e-9, hi + base))
+		return clamp(num / den, 0, 1)
+	case .Sqrt:
+		return clamp(math.sqrt(clamp((value - lo) / (hi - lo), 0, 1)), 0, 1)
+	case .Linear:
+	}
+	return clamp((value - lo) / (hi - lo), 0, 1)
 }
 
 // A sensible aggregate rule when a descriptor does not name one.
