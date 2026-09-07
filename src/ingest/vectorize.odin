@@ -112,10 +112,16 @@ Vector_Options :: struct {
 
 Vector_Result :: struct {
 	cells_written:    int,
+	// Features that put at least one sample into the world. Counted after the
+	// geometry is walked, not before: a bounding box that overlaps the world
+	// does not mean the line inside it does, and a global dataset over a small
+	// world produces plenty of features that pass the box test and touch
+	// nothing.
 	features_used:    int,
-	// Rejected by the filter.
+	// Rejected by the filter, or carrying no value for this layer.
 	features_skipped: int,
-	// Outside the world.
+	// Did not reach the world -- rejected by the bounding-box test, or walked
+	// and found to touch no cell inside it.
 	features_outside: int,
 	line_metres:      f64,
 	// Widest line feature rasterised, in metres. Zero means centrelines only.
@@ -215,7 +221,8 @@ vectorize :: proc(
 			res.features_skipped += 1
 			continue
 		}
-		res.features_used += 1
+		before := a.adds
+		feature_width := 0.0
 
 		switch f.kind {
 		case .Point:
@@ -236,7 +243,7 @@ vectorize :: proc(
 				w, has_width := feature_value(f, o.width)
 				width = has_width ? w : 0
 			}
-			res.max_width = math.max(res.max_width, width)
+			feature_width = width
 			for r in feature_rings(fc, f) {
 				if r.count < 2 {
 					continue
@@ -262,6 +269,13 @@ vectorize :: proc(
 		case .Polygon:
 			rings := feature_rings(fc, f)
 			fill_polygon(&a, fc, pts, rings, lay, bounds, o, v, cell_area_km2, &value_buf)
+		}
+
+		if a.adds > before {
+			res.features_used += 1
+			res.max_width = math.max(res.max_width, feature_width)
+		} else {
+			res.features_outside += 1
 		}
 	}
 

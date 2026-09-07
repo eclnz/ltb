@@ -265,16 +265,26 @@ draw_inspector :: proc(a: ^app.App, level: int, h: hex.Hex, max_rows := 30) {
 // Full-window message
 // ---------------------------------------------------------------------------
 
-// Why there is no map, in the middle of the window where the map would be. The
-// alternative -- drawing some other layer so the window looks busy -- is what
-// this viewer does not do.
+/*
+Why there is no map, in the middle of the window where the map would be.
+
+The alternative -- drawing some other layer so the window looks busy -- is what
+this viewer does not do. `problems` is the per-source detail underneath the
+headline: "this dataset loaded no data" tells you the outcome, and the lines
+below it are the only place a windowed run says which source failed and why.
+*/
 @(private)
-draw_no_map :: proc(reason: string) {
-	y := ui.screen_height() / 2 - 30
+draw_no_map :: proc(reason: string, problems: []string) {
+	y := ui.screen_height() / 2 - 30 - i32(len(problems)) * (ui.ROW_H / 2)
 	ui.text_screen_centered(reason, y, ui.TITLE - 2, ui.ALERT)
+	y += 34
+	for p in problems {
+		ui.text_screen_centered(p, y, ui.SMALL, ui.WARN)
+		y += ui.ROW_H
+	}
 	ui.text_screen_centered(
 		"File > Open dataset, press o, or drop a GeoTIFF or GeoJSON on the window",
-		y + 34,
+		y + 12,
 		ui.BODY,
 		ui.TEXT_MUTED,
 	)

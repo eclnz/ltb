@@ -266,6 +266,21 @@ report_unknown :: proc(rep: ^Source_Report, what, name: string, allocator := con
 	rep.message = fmt.aprintf("no %s called %q", what, name, allocator = allocator)
 }
 
+/*
+A source that read and resampled cleanly and wrote no cells.
+
+No step failed, so nothing below can report it -- but the entry exists to put
+data in a layer and no data arrived, which is the failure the author needs to
+see. It is nearly always a mismatch of extent or scale: a world smaller than
+the source's sampling, or a source that covers somewhere else. Reported as a
+failed source so the count at the end of the run is the number of layers that
+actually got something.
+*/
+@(private)
+empty_note :: proc(cells_written: int) -> string {
+	return cells_written > 0 ? "" : "  -- nothing in this file reaches this world"
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -367,21 +382,39 @@ load_raster_entry :: proc(
 	}
 
 	res, rerr := rasterize(w, &raster, id, opts)
+	if rerr == .Source_Too_Coarse {
+		// The one error whose numbers are the whole message: knowing the source
+		// is too coarse is useless without knowing by how much.
+		rep.ok = false
+		rep.message = fmt.aprintf(
+			"%s %dx%d %v -- one %.0f m pixel spans %.0f of this world's %.2f m cells; too coarse to resample onto it",
+			reader.name,
+			raster.width,
+			raster.height,
+			raster.kind,
+			res.source_pitch,
+			res.source_pitch / res.cell_pitch,
+			res.cell_pitch,
+			allocator = allocator,
+		)
+		return
+	}
 	if rerr != .None {
 		report_error(&rep, rerr, allocator)
 		return
 	}
-	rep.ok = true
+	rep.ok = res.cells_written > 0
 	rep.cells_written = res.cells_written
 	rep.message = fmt.aprintf(
-		"%s %dx%d %v, ~%.0f m/px, %v -> %d cells",
+		"%s %dx%d %v, ~%.0f m/px, %v -> %d cells%s",
 		reader.name,
 		raster.width,
 		raster.height,
 		raster.kind,
-		raster_ground_resolution(&raster),
+		res.source_pitch,
 		res.resample_used,
 		res.cells_written,
+		empty_note(res.cells_written),
 		allocator = allocator,
 	)
 	return
@@ -475,10 +508,10 @@ load_vector_entry :: proc(
 	}
 
 	points, lines, polys := feature_count_by_kind(fc)
-	rep.ok = true
+	rep.ok = res.cells_written > 0
 	rep.cells_written = res.cells_written
 	rep.message = fmt.aprintf(
-		"%d pt / %d line / %d poly, %d used / %d filtered / %d outside, width %.0f m -> %d cells",
+		"%d pt / %d line / %d poly, %d used / %d filtered / %d outside, width %.0f m -> %d cells%s",
 		points,
 		lines,
 		polys,
@@ -487,6 +520,7 @@ load_vector_entry :: proc(
 		res.features_outside,
 		res.max_width,
 		res.cells_written,
+		empty_note(res.cells_written),
 		allocator = allocator,
 	)
 	return

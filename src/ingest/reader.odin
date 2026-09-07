@@ -56,6 +56,9 @@ Ingest_Error :: enum {
 	// Resampling onto the grid
 	Unknown_Layer,
 	Too_Many_Cells,
+	// The source's pixels are so much larger than the world's cells that
+	// resampling would invent the difference. See `MAX_UPSAMPLE`.
+	Source_Too_Coarse,
 	Bad_Raster,
 	Component_Mismatch,
 }

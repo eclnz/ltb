@@ -204,7 +204,7 @@ run_interactive :: proc(a: ^app.App) {
 			}
 			draw_hud(a, &cam, view, stats, hovered, running, show_inspector)
 		} else {
-			draw_no_map(menu.status)
+			draw_no_map(menu.status, a.problems)
 		}
 		menu_draw(&menu, a)
 		rl.EndDrawing()

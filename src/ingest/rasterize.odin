@@ -52,6 +52,34 @@ Raster_Result :: struct {
 	samples_missing: int,
 	resample_used:  Resample,
 	gap_filled:     int,
+	// Ground distance across one source pixel and one destination cell, in
+	// metres. The resampler needs their ratio to choose a mode; a caller needs
+	// it to notice that the two are nowhere near each other.
+	source_pitch:   f64,
+	cell_pitch:     f64,
+}
+
+/*
+How many cells one source pixel is stretched across before the result stops
+meaning anything.
+
+Resampling a coarse source onto a finer grid is ordinary -- that is what
+interpolation is for -- but it is a matter of degree. At 32 cells to the pixel,
+one source sample is spread over a thousand cells and every one of them is
+invented; the layer looks like a million measurements of ground that was
+measured fourteen thousand times in total. Past this the answer is not a
+resample to tune, it is a world too fine for the data or data for somewhere
+else.
+*/
+MAX_UPSAMPLE :: 32
+
+// True when the source is so much coarser than the grid that resampling it
+// would manufacture detail rather than carry it.
+raster_too_coarse :: proc "contextless" (res: Raster_Result) -> bool {
+	if res.source_pitch <= 0 || res.cell_pitch <= 0 {
+		return false
+	}
+	return res.source_pitch > res.cell_pitch * MAX_UPSAMPLE
 }
 
 @(private)
@@ -115,10 +143,18 @@ rasterize :: proc(
 		return {}, .Too_Many_Cells
 	}
 
+	src_res := raster_ground_resolution(r)
+	pitch := world.level_resolution(w, o.level)
+	res.source_pitch = src_res
+	res.cell_pitch = pitch
+	// Checked before any resampling: writing ten million cells and then saying
+	// they are meaningless costs the seconds and the memory anyway.
+	if raster_too_coarse(res) {
+		return res, .Source_Too_Coarse
+	}
+
 	mode := o.resample
 	if mode == .Auto {
-		src_res := raster_ground_resolution(r)
-		pitch := world.level_resolution(w, o.level)
 		if src_res > 0 && src_res <= pitch {
 			mode = .Scatter
 		} else {

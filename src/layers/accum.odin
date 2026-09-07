@@ -37,6 +37,10 @@ Accumulator :: struct {
 	cats:    [dynamic]Cat_Slot, // ACCUM_CAT_SLOTS per cell
 	use_cat: bool,
 	use_aux: bool,
+	// Samples added so far, counting repeats into the same cell. A caller
+	// feeding one source feature at a time reads this before and after to learn
+	// whether that feature contributed anything at all.
+	adds:    int,
 }
 
 // `rule` overrides the descriptor's aggregate; pass the descriptor's own rule
@@ -105,6 +109,7 @@ accum_add :: proc(a: ^Accumulator, h: hex.Hex, values: []f64) {
 	slot := accum_slot(a, h)
 	base := slot * a.nc
 	first := a.counts[slot] == 0
+	a.adds += 1
 
 	switch a.rule {
 	case .Mean, .Sum, .Composition_Mean:

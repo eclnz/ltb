@@ -24,6 +24,11 @@ App :: struct {
 	world:    world.World,
 	sim:      sim.Sim,
 	opts:     Options,
+	// Why the last load did not give the world everything it asked for, one
+	// line per failed source. The headless run prints these as it goes, but a
+	// windowed front end has no terminal in front of it, and "no data" without
+	// the reason is not something anyone can act on. Owned by the App.
+	problems: []string,
 }
 
 // Builds everything the front ends share. On success the caller owns `app` and
@@ -71,7 +76,7 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 	// the gaps, so a layer with no data reads as no data rather than as a
 	// plausible-looking model of something that was never measured.
 	if len(opts.manifest) > 0 {
-		load_manifest(&app.world, opts.manifest)
+		app.problems = load_manifest(&app.world, opts.manifest)
 	}
 	if len(opts.load_path) > 0 {
 		load_source(&app.world, opts.load_path, opts.load_layer)
@@ -95,7 +100,21 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 		fmt.eprintfln("%d of %d systems came up; %q was the first that did not", ready, len(app.sim.systems), failed)
 		return false
 	}
-	fmt.printfln("sim: %d of %d systems ready", ready, len(app.sim.systems))
+	// "Ready" is a claim about binding, not about data: `setup` checks that
+	// every layer a system named is registered, and every standard layer is
+	// registered whether or not anything was ever loaded into it. That is the
+	// right test -- data can still arrive from File > Open or a dropped file
+	// after the systems are up -- but on an empty world it reads as a
+	// simulation about to run when in fact every tick will touch nothing.
+	if app.store.bytes_resident == 0 {
+		fmt.printfln(
+			"sim: %d of %d systems bound, but no layer holds data; every tick will do nothing until some is loaded",
+			ready,
+			len(app.sim.systems),
+		)
+	} else {
+		fmt.printfln("sim: %d of %d systems ready", ready, len(app.sim.systems))
+	}
 
 	if opts.ticks > 0 {
 		run_ticks(&app.sim, opts.ticks)
@@ -104,6 +123,11 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 }
 
 shutdown :: proc(app: ^App) {
+	for p in app.problems {
+		delete(p)
+	}
+	delete(app.problems)
+	app.problems = nil
 	sim.destroy(&app.sim)
 	world.destroy(&app.world)
 	layers.store_destroy(&app.store)
@@ -145,20 +169,26 @@ report_layer_problems :: proc(rep: ^layers.Layer_Manifest_Report, path: string) 
 	}
 }
 
-// Loads a whole dataset manifest, reporting each source. One bad download does
+// Loads a whole dataset manifest, reporting each source. One bad source does
 // not stop the rest.
-load_manifest :: proc(w: ^world.World, path: string) {
+//
+// Returns one line per source that failed, for a front end that has to explain
+// the result without a terminal. The caller owns them.
+load_manifest :: proc(w: ^world.World, path: string) -> (problems: []string) {
 	start := time.now()
 	report, err := ingest.load_manifest(w, path)
 	if err != .None {
 		fmt.eprintfln("could not read %s: %v", path, err)
-		return
+		only := make([]string, 1)
+		only[0] = fmt.aprintf("could not read %s: %v", path, err)
+		return only
 	}
 	defer ingest.manifest_report_destroy(&report)
 
 	if report.layers_added > 0 {
 		fmt.printfln("manifest declared %d new layers", report.layers_added)
 	}
+	failures := make([dynamic]string, 0, report.failed)
 	for s in report.sources {
 		mark := s.ok ? "ok  " : "FAIL"
 		fmt.printfln(
@@ -170,6 +200,9 @@ load_manifest :: proc(w: ^world.World, path: string) {
 			s.read_seconds,
 			s.message,
 		)
+		if !s.ok {
+			append(&failures, fmt.aprintf("%s -> %s: %s", s.path, s.layer, s.message))
+		}
 	}
 	fmt.printfln(
 		"manifest: %d of %d sources loaded in %.2f s",
@@ -177,6 +210,7 @@ load_manifest :: proc(w: ^world.World, path: string) {
 		report.succeeded + report.failed,
 		time.duration_seconds(time.since(start)),
 	)
+	return failures[:]
 }
 
 load_source :: proc(w: ^world.World, path, layer_name: string) {
