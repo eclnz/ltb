@@ -22,6 +22,8 @@ NODATA_U8 :: 255.0
 NODATA_I8 :: -128.0
 NODATA_U16 :: 65535.0
 NODATA_I16 :: -32768.0
+NODATA_U32 :: 4294967295.0
+NODATA_I32 :: -2147483648.0
 
 @(private)
 scalar_layer :: proc(
@@ -46,8 +48,10 @@ scalar_layer :: proc(
 			nd = NODATA_U16
 		case .I16:
 			nd = NODATA_I16
-		case .U32, .I32:
-			nd = -1
+		case .U32:
+			nd = NODATA_U32
+		case .I32:
+			nd = NODATA_I32
 		case .F32, .F64:
 			nd = NAN
 		}

@@ -475,3 +475,72 @@ view_component :: #force_inline proc "contextless" (v: Chunk_View, cell_base, co
 	}
 	return decode_value(v.desc, raw), true
 }
+
+// Visits every cell of one layer at one level that holds data.
+//
+// Iterating the resident chunks is the only sane way to sweep a sparse world:
+// it touches the cells that exist, in memory order, instead of walking an index
+// space that is mostly empty.
+for_each_cell :: proc(
+	s: ^Store,
+	layer: Layer_Id,
+	level: u8,
+	user: rawptr,
+	visit: proc(user: rawptr, h: hex.Hex, value: f64),
+) -> (
+	visited: int,
+) {
+	d := desc_of(s.registry, layer)
+	if d == nil {
+		return 0
+	}
+	chunks := collect_chunks(s, layer, level, context.temp_allocator)
+	defer delete(chunks, context.temp_allocator)
+	for c in chunks {
+		v := Chunk_View{c, d}
+		for idx in 0 ..< CHUNK_AREA {
+			value, ok := view_get(v, idx)
+			if !ok {
+				continue
+			}
+			visit(user, hex_of_index(c.key.cx, c.key.cy, idx), value)
+			visited += 1
+		}
+	}
+	return
+}
+
+// Collects the cells of one layer at one level into a caller-owned slice.
+// Useful where a system needs to write while it reads, which iterating the
+// chunks directly would not allow.
+Cell :: struct {
+	hex:   hex.Hex,
+	value: f64,
+}
+
+collect_cells :: proc(s: ^Store, layer: Layer_Id, level: u8, allocator := context.allocator) -> []Cell {
+	d := desc_of(s.registry, layer)
+	if d == nil {
+		return nil
+	}
+	out := make([dynamic]Cell, 0, 4096, allocator)
+	chunks := collect_chunks(s, layer, level, context.temp_allocator)
+	defer delete(chunks, context.temp_allocator)
+	for c in chunks {
+		v := Chunk_View{c, d}
+		for idx in 0 ..< CHUNK_AREA {
+			value, ok := view_get(v, idx)
+			if !ok {
+				continue
+			}
+			append(&out, Cell{hex_of_index(c.key.cx, c.key.cy, idx), value})
+		}
+	}
+	return out[:]
+}
+
+// True when a cell holds data, without decoding it.
+get_or_ok :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex) -> bool {
+	_, ok := get(s, layer, level, h)
+	return ok
+}

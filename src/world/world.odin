@@ -259,3 +259,23 @@ bounds_for_geo :: proc(w: ^World, level: int, b: geo.Geo_Bounds) -> hex.Bounds {
 extent :: proc(w: ^World, level: int) -> hex.Bounds {
 	return bounds_for_geo(w, level, w.bounds)
 }
+
+// Projected-metre bounding box of the world's configured geographic extent.
+world_extent_metres :: proc(w: ^World) -> (min, max: geo.Point) {
+	b := w.bounds
+	pts := [4]geo.Point {
+		geo.forward(w.projection, geo.lat_lon(b.lat_min, b.lon_min)),
+		geo.forward(w.projection, geo.lat_lon(b.lat_min, b.lon_max)),
+		geo.forward(w.projection, geo.lat_lon(b.lat_max, b.lon_min)),
+		geo.forward(w.projection, geo.lat_lon(b.lat_max, b.lon_max)),
+	}
+	min = pts[0]
+	max = pts[0]
+	for i in 1 ..< 4 {
+		min.x = math.min(min.x, pts[i].x)
+		min.y = math.min(min.y, pts[i].y)
+		max.x = math.max(max.x, pts[i].x)
+		max.y = math.max(max.y, pts[i].y)
+	}
+	return
+}

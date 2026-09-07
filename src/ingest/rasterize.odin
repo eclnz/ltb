@@ -135,7 +135,7 @@ rasterize :: proc(
 
 	if mode == .Scatter {
 		a: layers.Accumulator
-		layers.accum_init(&a, d, rule, context.temp_allocator)
+		layers.accum_init(&a, d, rule, context.allocator, min(hex.bounds_count(bounds), r.width * r.height))
 		defer layers.accum_destroy(&a)
 
 		values: [layers.MAX_ACCUM_COMPONENTS]f64

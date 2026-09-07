@@ -43,20 +43,25 @@ Accumulator :: struct {
 
 // `rule` overrides the descriptor's aggregate; pass the descriptor's own rule
 // to keep it.
-accum_init :: proc(a: ^Accumulator, d: ^Layer_Desc, rule: Aggregate, allocator := context.allocator) {
+//
+// Prefer a heap allocator here rather than the temporary one: an accumulator
+// over a large region holds tens of megabytes, and an arena would not hand any
+// of it back when the accumulator is destroyed.
+accum_init :: proc(a: ^Accumulator, d: ^Layer_Desc, rule: Aggregate, allocator := context.allocator, expect_cells := 1024) {
 	a.desc = d
 	a.rule = rule
 	a.nc = min(desc_components(d), MAX_ACCUM_COMPONENTS)
 	a.use_cat = rule == .Majority
 	a.use_aux = rule == .Circular_Mean
-	a.index = make(map[hex.Hex]int, 1024, allocator)
-	a.sums = make([dynamic]f64, allocator)
-	a.counts = make([dynamic]i32, allocator)
+	n := max(expect_cells, 64)
+	a.index = make(map[hex.Hex]int, n * 2, allocator)
+	a.sums = make([dynamic]f64, 0, n * a.nc, allocator)
+	a.counts = make([dynamic]i32, 0, n, allocator)
 	if a.use_aux {
-		a.aux = make([dynamic]f64, allocator)
+		a.aux = make([dynamic]f64, 0, n * a.nc, allocator)
 	}
 	if a.use_cat {
-		a.cats = make([dynamic]Cat_Slot, allocator)
+		a.cats = make([dynamic]Cat_Slot, 0, n * ACCUM_CAT_SLOTS, allocator)
 	}
 }
 
@@ -80,13 +85,21 @@ accum_slot :: proc(a: ^Accumulator, h: hex.Hex) -> int {
 	}
 	i := len(a.counts)
 	a.index[h] = i
+	// `append` grows capacity geometrically; `resize` would reallocate to the
+	// exact length on every cell, which is quadratic.
 	append(&a.counts, 0)
-	resize(&a.sums, (i + 1) * a.nc)
+	for _ in 0 ..< a.nc {
+		append(&a.sums, 0)
+	}
 	if a.use_aux {
-		resize(&a.aux, (i + 1) * a.nc)
+		for _ in 0 ..< a.nc {
+			append(&a.aux, 0)
+		}
 	}
 	if a.use_cat {
-		resize(&a.cats, (i + 1) * ACCUM_CAT_SLOTS)
+		for _ in 0 ..< ACCUM_CAT_SLOTS {
+			append(&a.cats, Cat_Slot{})
+		}
 	}
 	return i
 }
