@@ -48,7 +48,10 @@ build_level :: proc(w: ^World, layer: layers.Layer_Id, source_level: int) -> (wr
 	esz := layers.element_size(d.kind)
 
 	for c in chunks {
-		v := layers.Chunk_View{c, d}
+		v, has_view := layers.view(w.store, layer, src, c.key.cx, c.key.cy)
+		if !has_view {
+			continue
+		}
 		for idx in 0 ..< layers.CHUNK_AREA {
 			any_data := false
 			cell_base := uintptr(idx * c.stride)

@@ -3,6 +3,7 @@ package ingest
 import "core:mem"
 import "core:strings"
 import geo "ltb:geo"
+import "ltb:layers"
 
 /*
 What this package can read, and how a name becomes a thing.
@@ -142,33 +143,14 @@ is_readable :: proc(path: string) -> bool {
 // Names in a manifest
 // ---------------------------------------------------------------------------
 
-// One spelling of an enum value. Several rows may share a value, which is how
-// "nearest" and "gather_nearest" reach the same resampler.
-Named :: struct($E: typeid) {
-	name:  string,
-	value: E,
-}
-
 /*
-The value a name denotes, case-insensitively.
+The names a manifest may use for this package's own enums.
 
-`ok` is false for a name that is not in the table, and every caller in this
-package reports that rather than substituting a default. A manifest saying
-"measure": "coverge" would otherwise ingest a completely different quantity and
-say nothing about it.
+The table type and the lookup live in `layers`, which sits below this package
+and has the same problem with the same stakes: a name nobody recognises is
+reported, never quietly replaced with a default.
 */
-enum_from_name :: proc(s: string, table: []Named($E)) -> (value: E, ok: bool) {
-	trimmed := strings.trim_space(s)
-	lower := strings.to_lower(trimmed, context.temp_allocator)
-	for entry in table {
-		if entry.name == lower {
-			return entry.value, true
-		}
-	}
-	return {}, false
-}
-
-RESAMPLE_NAMES := [?]Named(Resample) {
+RESAMPLE_NAMES := [?]layers.Named(Resample) {
 	{"auto", .Auto},
 	{"scatter", .Scatter},
 	{"nearest", .Gather_Nearest},
@@ -178,7 +160,7 @@ RESAMPLE_NAMES := [?]Named(Resample) {
 	{"gather_linear", .Gather_Linear},
 }
 
-MEASURE_NAMES := [?]Named(Measure) {
+MEASURE_NAMES := [?]layers.Named(Measure) {
 	{"presence", .Presence},
 	{"any", .Presence},
 	{"count", .Count},

@@ -19,11 +19,9 @@ Chunk_Key :: struct {
 }
 
 Chunk :: struct {
-	key:       Chunk_Key,
-	data:      []byte,
-	stride:    int, // bytes per cell
-	last_used: u64,
-	dirty:     bool,
+	key:    Chunk_Key,
+	data:   []byte,
+	stride: int, // bytes per cell
 }
 
 // Sparse chunk store. Only chunks that have been written exist; everything else
@@ -32,17 +30,12 @@ Store :: struct {
 	registry:       ^Registry,
 	chunks:         map[Chunk_Key]^Chunk,
 	allocator:      mem.Allocator,
-	tick:           u64,
 	bytes_resident: int,
-	// Soft cap on resident chunk bytes. Zero means unbounded. Chunks are only
-	// evicted by an explicit `store_trim` call, never underneath a caller.
-	budget_bytes:   int,
-	// Called before a dirty chunk is dropped, so generated or edited data can
-	// be persisted instead of lost.
-	on_evict:       proc(store: ^Store, chunk: ^Chunk),
-	user_data:      rawptr,
 	// Writes whose value did not fit the layer's element type and were pinned
-	// to the end of its range.
+	// to the end of its range. Every write goes through `set` or
+	// `set_components`, so this counts all of them: an elevation layer quietly
+	// clipping at the top of its i16 range shows up here rather than as a
+	// mysteriously flat mountain.
 	saturated:      int,
 }
 
@@ -147,20 +140,25 @@ read_element :: proc "contextless" (kind: Element_Kind, p: rawptr) -> f64 {
 }
 
 // Writes one element, clamping to the destination type's range.
+//
+// The bounds come from `ELEMENT_TRAITS`, so this cannot disagree with
+// `encode_storable` about what an element type can hold.
 write_element :: proc "contextless" (kind: Element_Kind, p: rawptr, v: f64) {
+	t := ELEMENT_TRAITS[kind]
+	c := clamp(v, t.lo, t.hi)
 	switch kind {
 	case .U8:
-		intrinsics.unaligned_store((^u8)(p), u8(clamp(v, 0, 255)))
+		intrinsics.unaligned_store((^u8)(p), u8(c))
 	case .I8:
-		intrinsics.unaligned_store((^i8)(p), i8(clamp(v, -128, 127)))
+		intrinsics.unaligned_store((^i8)(p), i8(c))
 	case .U16:
-		intrinsics.unaligned_store((^u16)(p), u16(clamp(v, 0, 65535)))
+		intrinsics.unaligned_store((^u16)(p), u16(c))
 	case .I16:
-		intrinsics.unaligned_store((^i16)(p), i16(clamp(v, -32768, 32767)))
+		intrinsics.unaligned_store((^i16)(p), i16(c))
 	case .U32:
-		intrinsics.unaligned_store((^u32)(p), u32(clamp(v, 0, 4294967295)))
+		intrinsics.unaligned_store((^u32)(p), u32(c))
 	case .I32:
-		intrinsics.unaligned_store((^i32)(p), i32(clamp(v, -2147483648, 2147483647)))
+		intrinsics.unaligned_store((^i32)(p), i32(c))
 	case .F32:
 		intrinsics.unaligned_store((^f32)(p), f32(v))
 	case .F64:
@@ -174,11 +172,7 @@ write_element :: proc "contextless" (kind: Element_Kind, p: rawptr, v: f64) {
 
 find_chunk :: proc(s: ^Store, key: Chunk_Key) -> ^Chunk {
 	c, ok := s.chunks[key]
-	if !ok {
-		return nil
-	}
-	c.last_used = s.tick
-	return c
+	return ok ? c : nil
 }
 
 // Returns the chunk for `key`, allocating and filling it with the layer's
@@ -196,7 +190,6 @@ get_or_create_chunk :: proc(s: ^Store, key: Chunk_Key) -> ^Chunk {
 	c.key = key
 	c.stride = stride
 	c.data = make([]byte, CHUNK_AREA * stride, s.allocator)
-	c.last_used = s.tick
 	if d.has_nodata && d.nodata_raw != 0 {
 		fill_chunk_raw(d, c, d.nodata_raw)
 	}
@@ -206,47 +199,13 @@ get_or_create_chunk :: proc(s: ^Store, key: Chunk_Key) -> ^Chunk {
 }
 
 // Writes `raw` into every component of every cell of the chunk.
+@(private)
 fill_chunk_raw :: proc(d: ^Layer_Desc, c: ^Chunk, raw: f64) {
 	nc := desc_components(d)
 	esz := element_size(d.kind)
 	for i in 0 ..< CHUNK_AREA * nc {
 		write_element(d.kind, rawptr(uintptr(raw_data(c.data)) + uintptr(i * esz)), raw)
 	}
-}
-
-// Drops least-recently-used chunks until the store is inside its byte budget.
-// Dirty chunks are handed to `on_evict` first; without a handler they are kept
-// and the budget is exceeded.
-store_trim :: proc(s: ^Store) -> (evicted: int) {
-	if s.budget_bytes <= 0 || s.bytes_resident <= s.budget_bytes {
-		return 0
-	}
-	candidates := make([dynamic]^Chunk, 0, len(s.chunks), context.temp_allocator)
-	defer delete(candidates)
-	for _, c in s.chunks {
-		append(&candidates, c)
-	}
-	slice.sort_by(candidates[:], proc(a, b: ^Chunk) -> bool {
-		return a.last_used < b.last_used
-	})
-	for c in candidates {
-		if s.bytes_resident <= s.budget_bytes {
-			break
-		}
-		if c.dirty {
-			if s.on_evict == nil {
-				continue
-			}
-			s.on_evict(s, c)
-			c.dirty = false
-		}
-		s.bytes_resident -= len(c.data)
-		delete_key(&s.chunks, c.key)
-		delete(c.data, s.allocator)
-		free(c, s.allocator)
-		evicted += 1
-	}
-	return
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +283,6 @@ set :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex, value: f64) -> bo
 		s.saturated += 1
 	}
 	write_element(d.kind, rawptr(uintptr(raw_data(c.data)) + uintptr(idx * c.stride)), raw)
-	c.dirty = true
 	return true
 }
 
@@ -351,27 +309,6 @@ set_components :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex, values
 		}
 		write_element(d.kind, rawptr(base + uintptr(i * esz)), raw)
 	}
-	c.dirty = true
-	return true
-}
-
-// Marks a cell as having no data. Only meaningful for layers with a sentinel.
-clear_cell :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex) -> bool {
-	d := desc_of(s.registry, layer)
-	if d == nil || !d.has_nodata {
-		return false
-	}
-	cx, cy, idx := chunk_of(h)
-	c := find_chunk(s, Chunk_Key{layer, level, cx, cy})
-	if c == nil {
-		return true // already absent
-	}
-	esz := element_size(d.kind)
-	base := uintptr(raw_data(c.data)) + uintptr(idx * c.stride)
-	for i in 0 ..< desc_components(d) {
-		write_element(d.kind, rawptr(base + uintptr(i * esz)), d.nodata_raw)
-	}
-	c.dirty = true
 	return true
 }
 
@@ -407,27 +344,12 @@ view_get :: #force_inline proc "contextless" (v: Chunk_View, index: int) -> (f64
 	return decode_value(v.desc, raw), true
 }
 
-view_set :: #force_inline proc "contextless" (v: Chunk_View, index: int, value: f64) {
-	raw, _ := encode_storable(v.desc, value)
-	write_element(v.desc.kind, rawptr(uintptr(raw_data(v.chunk.data)) + uintptr(index * v.chunk.stride)), raw)
-	v.chunk.dirty = true
-}
-
-// Reinterprets a chunk's storage as a typed slice. Only valid when the layer's
-// element kind matches T; returns nil otherwise.
-typed :: proc(v: Chunk_View, $T: typeid) -> []T {
-	expect: Element_Kind
-	when T == u8 {expect = .U8} else when T == i8 {expect = .I8} else when T == u16 {expect = .U16} else when T == i16 {expect = .I16} else when T == u32 {expect = .U32} else when T == i32 {expect = .I32} else when T == f32 {expect = .F32} else when T == f64 {expect = .F64} else {
-		#panic("layers.typed: unsupported element type")
-	}
-	if v.desc.kind != expect {
-		return nil
-	}
-	return slice.reinterpret([]T, v.chunk.data)
-}
-
 // ---------------------------------------------------------------------------
 // Enumeration
+//
+// Every query below is the same two nested walks -- chunks of one layer and
+// level, then the cells inside them -- so they are written once here and the
+// callers differ only in what they do per cell.
 // ---------------------------------------------------------------------------
 
 // Every resident chunk of one layer at one level. The returned slice is owned
@@ -453,8 +375,27 @@ count_chunks :: proc(s: ^Store, layer: Layer_Id, level: u8) -> (n: int) {
 	return
 }
 
-// Drops every chunk of one layer at one level without consulting `on_evict`.
-// Used when a pyramid level is about to be rebuilt from scratch.
+/*
+Resident chunks per layer, summed over every level, in one pass.
+
+`out` is indexed by `Layer_Id` and must be at least `layer_count` long. This
+exists because the obvious way to write that report -- `count_chunks` per layer
+per level -- rescans every chunk in the store a few hundred times to answer a
+question one pass can answer.
+*/
+chunk_counts :: proc(s: ^Store, out: []int) {
+	for i in 0 ..< len(out) {
+		out[i] = 0
+	}
+	for key, _ in s.chunks {
+		if int(key.layer) < len(out) {
+			out[int(key.layer)] += 1
+		}
+	}
+}
+
+// Drops every chunk of one layer at one level. Used when a pyramid level is
+// about to be rebuilt from scratch.
 drop_level :: proc(s: ^Store, layer: Layer_Id, level: u8) -> (dropped: int) {
 	keys := make([dynamic]Chunk_Key, 0, 64, context.temp_allocator)
 	defer delete(keys)
@@ -515,9 +456,57 @@ for_each_cell :: proc(
 	return
 }
 
+// What a layer holds at one level, without materialising it.
+Value_Stats :: struct {
+	count:  int,
+	lo, hi: f64,
+	sum:    f64,
+}
+
+/*
+Range and mean of one layer at one level.
+
+Every caller that wanted this used to `collect_cells` and reduce the slice,
+which allocates sixteen bytes per cell to compute three numbers -- on a
+million-cell imagery layer that is a hundred and eighty megabytes of temporary
+to find a minimum. `ok` is false when the layer holds no data at that level.
+*/
+value_stats :: proc(s: ^Store, layer: Layer_Id, level: u8) -> (stats: Value_Stats, ok: bool) {
+	d := desc_of(s.registry, layer)
+	if d == nil {
+		return {}, false
+	}
+	chunks := collect_chunks(s, layer, level, context.temp_allocator)
+	defer delete(chunks, context.temp_allocator)
+	for c in chunks {
+		v := Chunk_View{c, d}
+		for idx in 0 ..< CHUNK_AREA {
+			value, has := view_get(v, idx)
+			if !has {
+				continue
+			}
+			if stats.count == 0 {
+				stats.lo, stats.hi = value, value
+			} else {
+				stats.lo = min(stats.lo, value)
+				stats.hi = max(stats.hi, value)
+			}
+			stats.sum += value
+			stats.count += 1
+		}
+	}
+	return stats, stats.count > 0
+}
+
+value_mean :: proc(stats: Value_Stats) -> f64 {
+	return stats.count > 0 ? stats.sum / f64(stats.count) : 0
+}
+
 // Collects the cells of one layer at one level into a caller-owned slice.
-// Useful where a system needs to write while it reads, which iterating the
-// chunks directly would not allow.
+//
+// Only for callers that need to write the layer while reading it, which
+// iterating the chunks would not allow. Anything that just reduces the cells
+// wants `value_stats` or `for_each_cell` instead, and none of this memory.
 Cell :: struct {
 	hex:   hex.Hex,
 	value: f64,
@@ -534,18 +523,12 @@ collect_cells :: proc(s: ^Store, layer: Layer_Id, level: u8, allocator := contex
 	for c in chunks {
 		v := Chunk_View{c, d}
 		for idx in 0 ..< CHUNK_AREA {
-			value, ok := view_get(v, idx)
-			if !ok {
+			value, has := view_get(v, idx)
+			if !has {
 				continue
 			}
 			append(&out, Cell{hex_of_index(c.key.cx, c.key.cy, idx), value})
 		}
 	}
 	return out[:]
-}
-
-// True when a cell holds data, without decoding it.
-get_or_ok :: proc(s: ^Store, layer: Layer_Id, level: u8, h: hex.Hex) -> bool {
-	_, ok := get(s, layer, level, h)
-	return ok
 }

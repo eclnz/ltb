@@ -1,6 +1,7 @@
 package layers
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:os"
 import "core:strings"
 
@@ -48,6 +49,38 @@ Manifest_Error :: enum {
 	Bad_Layer,
 }
 
+// A declaration that did not become a layer, and why. A manifest of ten layers
+// where three are malformed used to report seven added and nothing else; the
+// three that vanished are exactly what the author needs to hear about.
+Layer_Problem :: struct {
+	// The declaration's "name", or "" when that is what was missing.
+	name:   string,
+	reason: string,
+}
+
+Layer_Manifest_Report :: struct {
+	added:     int,
+	// Declarations that could not be read. Owned by the report.
+	skipped:   []Layer_Problem,
+	// Names already registered. A manifest adds layers and never redefines one,
+	// so these were ignored -- which is the intended policy, but not something
+	// to do quietly.
+	redefined: []string,
+}
+
+layer_manifest_report_destroy :: proc(rep: ^Layer_Manifest_Report, allocator := context.allocator) {
+	for p in rep.skipped {
+		delete(p.name, allocator)
+		delete(p.reason, allocator)
+	}
+	delete(rep.skipped, allocator)
+	for n in rep.redefined {
+		delete(n, allocator)
+	}
+	delete(rep.redefined, allocator)
+	rep^ = {}
+}
+
 // Loads layer declarations from a JSON file. Strings are cloned into
 // `allocator`, which must outlive the registry.
 load_layer_manifest :: proc(
@@ -55,12 +88,12 @@ load_layer_manifest :: proc(
 	path: string,
 	allocator := context.allocator,
 ) -> (
-	added: int,
+	report: Layer_Manifest_Report,
 	err: Manifest_Error,
 ) {
 	src, ferr := os.read_entire_file(path, context.allocator)
 	if ferr != nil {
-		return 0, .File_Not_Found
+		return {}, .File_Not_Found
 	}
 	defer delete(src, context.allocator)
 	return parse_layer_manifest(r, string(src), allocator)
@@ -71,12 +104,12 @@ parse_layer_manifest :: proc(
 	text: string,
 	allocator := context.allocator,
 ) -> (
-	added: int,
+	report: Layer_Manifest_Report,
 	err: Manifest_Error,
 ) {
 	root, jerr := json.parse_string(text, json.DEFAULT_SPECIFICATION, false, context.allocator)
 	if jerr != nil {
-		return 0, .Bad_Json
+		return {}, .Bad_Json
 	}
 	defer json.destroy_value(root, context.allocator)
 
@@ -87,64 +120,107 @@ parse_layer_manifest :: proc(
 	case json.Object:
 		entry, has := v["layers"]
 		if !has {
-			return 0, .Bad_Layer
+			return {}, .Bad_Layer
 		}
 		arr, is_arr := entry.(json.Array)
 		if !is_arr {
-			return 0, .Bad_Layer
+			return {}, .Bad_Layer
 		}
 		list = arr
 	case json.Null, json.Integer, json.Float, json.Boolean, json.String:
-		return 0, .Bad_Layer
+		return {}, .Bad_Layer
 	}
 
+	skipped := make([dynamic]Layer_Problem, 0, 4, allocator)
+	redefined := make([dynamic]string, 0, 4, allocator)
 	for item in list {
-		obj, ok := item.(json.Object)
-		if !ok {
+		obj, is_obj := item.(json.Object)
+		if !is_obj {
+			append(&skipped, Layer_Problem{strings.clone("", allocator), strings.clone("not an object", allocator)})
 			continue
 		}
-		desc, built := layer_from_json(obj, allocator)
+		desc, reason, built := layer_from_json(obj, allocator)
 		if !built {
+			append(
+				&skipped,
+				Layer_Problem {
+					strings.clone(json_string(obj, "name"), allocator),
+					strings.clone(reason, allocator),
+				},
+			)
 			continue
 		}
 		if _, fresh := register(r, desc); fresh {
-			added += 1
+			report.added += 1
+		} else {
+			append(&redefined, strings.clone(desc.name, allocator))
 		}
 	}
-	return added, .None
+	report.skipped = skipped[:]
+	report.redefined = redefined[:]
+	return report, .None
 }
 
-// Builds one descriptor from a JSON object. Unspecified fields take the same
-// defaults `desc_normalize` applies to a hand-written descriptor.
-layer_from_json :: proc(obj: json.Object, allocator := context.allocator) -> (d: Layer_Desc, ok: bool) {
+/*
+Builds one descriptor from a JSON object.
+
+Unspecified fields take the same defaults `desc_normalize` applies to a
+hand-written descriptor. A field that is present but unreadable is refused
+instead: a misspelled element type or semantic changes how every cell of the
+layer is stored and combined, and silently taking the default produces a layer
+that looks fine and holds the wrong thing.
+
+`reason` says which field, for the report.
+*/
+layer_from_json :: proc(
+	obj: json.Object,
+	allocator := context.allocator,
+) -> (
+	d: Layer_Desc,
+	reason: string,
+	ok: bool,
+) {
 	name := json_string(obj, "name")
 	if len(name) == 0 {
-		return {}, false
+		return {}, "no \"name\"", false
 	}
 	d.name = strings.clone(name, allocator)
 	d.group = strings.clone(json_string(obj, "group", "custom"), allocator)
 	d.unit = strings.clone(json_string(obj, "unit"), allocator)
 	d.description = strings.clone(json_string(obj, "description"), allocator)
 
-	d.kind = element_kind_from_name(json_string(obj, "type", "f32"))
-	d.semantic = semantic_from_name(json_string(obj, "semantic", "scalar"))
+	kind_name := json_string(obj, "type", "f32")
+	kind_ok: bool
+	if d.kind, kind_ok = element_kind_lookup(kind_name); !kind_ok {
+		return {}, unknown_field(obj, "type", kind_name, allocator), false
+	}
+	semantic_name := json_string(obj, "semantic", "scalar")
+	semantic_ok: bool
+	if d.semantic, semantic_ok = semantic_lookup(semantic_name); !semantic_ok {
+		return {}, unknown_field(obj, "semantic", semantic_name, allocator), false
+	}
+	display_name := json_string(obj, "display", "linear")
+	display_ok: bool
+	if d.display, display_ok = value_scale_lookup(display_name); !display_ok {
+		return {}, unknown_field(obj, "display", display_name, allocator), false
+	}
+	interp_name := json_string(obj, "interpolate", "linear")
+	interp_ok: bool
+	if d.interp, interp_ok = interpolation_lookup(interp_name); !interp_ok {
+		return {}, unknown_field(obj, "interpolate", interp_name, allocator), false
+	}
+
 	d.scale = json_number(obj, "scale", 1)
 	d.offset = json_number(obj, "offset", 0)
 	d.min_value = json_number(obj, "min", 0)
 	d.max_value = json_number(obj, "max", 1)
 	d.components = u8(clamp(int(json_number(obj, "components", 1)), 1, 255))
-	d.interp = json_string(obj, "interpolate", "linear") == "nearest" ? .Nearest : .Linear
-	switch json_string(obj, "display", "linear") {
-	case "log":
-		d.display = .Log
-	case "sqrt":
-		d.display = .Sqrt
-	case:
-		d.display = .Linear
-	}
 
 	if agg := json_string(obj, "aggregate"); len(agg) > 0 {
-		d.aggregate = aggregate_from_name(agg)
+		agg_ok: bool
+		if d.aggregate, agg_ok = aggregate_lookup(agg); !agg_ok {
+			return {}, unknown_field(obj, "aggregate", agg, allocator), false
+		}
 	} else {
 		d.aggregate = default_aggregate(d.semantic)
 	}
@@ -155,25 +231,8 @@ layer_from_json :: proc(obj: json.Object, allocator := context.allocator) -> (d:
 			d.nodata_raw = v
 		}
 	} else {
-		// Give integer layers their top code, and floats NaN, matching the
-		// standard catalogue.
 		d.has_nodata = true
-		switch d.kind {
-		case .U8:
-			d.nodata_raw = 255
-		case .I8:
-			d.nodata_raw = -128
-		case .U16:
-			d.nodata_raw = 65535
-		case .I16:
-			d.nodata_raw = -32768
-		case .U32:
-			d.nodata_raw = 4294967295
-		case .I32:
-			d.nodata_raw = -2147483648
-		case .F32, .F64:
-			d.nodata_raw = NAN
-		}
+		d.nodata_raw = default_nodata_raw(d.kind)
 	}
 
 	if cats, has := obj["categories"]; has {
@@ -190,9 +249,21 @@ layer_from_json :: proc(obj: json.Object, allocator := context.allocator) -> (d:
 		d.components = 3
 	}
 
-	d.palette = palette_by_name(json_string(obj, "palette"), d.semantic)
+	if pal := json_string(obj, "palette"); len(pal) > 0 {
+		pal_ok: bool
+		if d.palette, pal_ok = palette_lookup(pal); !pal_ok {
+			return {}, unknown_field(obj, "palette", pal, allocator), false
+		}
+	} else {
+		d.palette = palette_for_semantic(d.semantic)
+	}
 	desc_normalize(&d)
-	return d, true
+	return d, "", true
+}
+
+@(private = "file")
+unknown_field :: proc(obj: json.Object, field, value: string, allocator := context.allocator) -> string {
+	return fmt.aprintf("no %s called %q", field, value, allocator = allocator)
 }
 
 @(private)
@@ -220,117 +291,6 @@ categories_from_json :: proc(arr: json.Array, allocator := context.allocator) ->
 		append(&out, c)
 	}
 	return out[:]
-}
-
-// ---------------------------------------------------------------------------
-// Name lookups
-// ---------------------------------------------------------------------------
-
-element_kind_from_name :: proc(s: string) -> Element_Kind {
-	switch strings.to_lower(s, context.temp_allocator) {
-	case "u8", "byte", "uint8":
-		return .U8
-	case "i8", "int8", "sbyte":
-		return .I8
-	case "u16", "uint16", "ushort":
-		return .U16
-	case "i16", "int16", "short":
-		return .I16
-	case "u32", "uint32", "uint":
-		return .U32
-	case "i32", "int32", "int":
-		return .I32
-	case "f64", "double", "float64":
-		return .F64
-	}
-	return .F32
-}
-
-semantic_from_name :: proc(s: string) -> Semantic {
-	switch strings.to_lower(s, context.temp_allocator) {
-	case "fraction":
-		return .Fraction
-	case "categorical", "category", "class":
-		return .Categorical
-	case "composition", "mix":
-		return .Composition
-	case "vector":
-		return .Vector
-	case "density":
-		return .Density
-	case "direction", "bearing", "angle":
-		return .Direction
-	case "boolean", "bool", "flag":
-		return .Boolean
-	case "color", "colour", "rgb":
-		return .Color
-	}
-	return .Scalar
-}
-
-// The aggregate a name denotes. `ok` is false for a name no rule answers to, so
-// that a caller reading a hand-written manifest can reject a typo instead of
-// silently combining cells by a rule nobody asked for.
-aggregate_lookup :: proc(s: string) -> (agg: Aggregate, ok: bool) {
-	switch strings.to_lower(s, context.temp_allocator) {
-	case "mean", "average":
-		return .Mean, true
-	case "sum":
-		return .Sum, true
-	case "min", "minimum":
-		return .Min, true
-	case "max", "maximum":
-		return .Max, true
-	case "majority", "mode":
-		return .Majority, true
-	case "composition", "composition_mean":
-		return .Composition_Mean, true
-	case "circular", "circular_mean":
-		return .Circular_Mean, true
-	case "any", "or":
-		return .Any, true
-	case "none":
-		return .None, true
-	}
-	return .Mean, false
-}
-
-// The lenient form, for a layer declaration where an unreadable rule is not
-// worth refusing the whole catalogue over.
-aggregate_from_name :: proc(s: string) -> Aggregate {
-	agg, _ := aggregate_lookup(s)
-	return agg
-}
-
-palette_by_name :: proc(s: string, semantic: Semantic) -> Palette {
-	switch strings.to_lower(s, context.temp_allocator) {
-	case "viridis":
-		return PALETTE_VIRIDIS
-	case "terrain":
-		return PALETTE_TERRAIN
-	case "greens", "green":
-		return PALETTE_GREENS
-	case "blues", "blue":
-		return PALETTE_BLUES
-	case "heat", "hot":
-		return PALETTE_HEAT
-	case "diverging", "anomaly":
-		return PALETTE_DIVERGING
-	case "cyclic", "direction":
-		return PALETTE_CYCLIC
-	case "moisture":
-		return PALETTE_MOISTURE
-	}
-	// No palette named: pick one the semantic implies.
-	#partial switch semantic {
-	case .Categorical:
-		return PALETTE_CATEGORICAL
-	case .Composition:
-		return PALETTE_COMPOSITION
-	case .Direction:
-		return PALETTE_CYCLIC
-	}
-	return PALETTE_VIRIDIS
 }
 
 // ---------------------------------------------------------------------------

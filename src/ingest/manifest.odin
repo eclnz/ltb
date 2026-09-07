@@ -68,11 +68,15 @@ Source_Report :: struct {
 Manifest_Report :: struct {
 	sources:  []Source_Report,
 	layers_added: int,
+	// What the manifest's own "layers" block declared, including anything it
+	// failed to declare.
+	layers:    layers.Layer_Manifest_Report,
 	succeeded: int,
 	failed:    int,
 }
 
 manifest_report_destroy :: proc(r: ^Manifest_Report, allocator := context.allocator) {
+	layers.layer_manifest_report_destroy(&r.layers, allocator)
 	for s in r.sources {
 		delete(s.message, allocator)
 		delete(s.path, allocator)
@@ -115,10 +119,13 @@ load_manifest :: proc(
 	// can be moved or shared without editing every entry.
 	base := filepath.dir(path)
 
-	// Custom layer declarations, if any.
+	// Custom layer declarations, if any. A declaration that could not be read is
+	// carried into this manifest's report rather than dropped: its sources are
+	// about to fail with "no layer named ...", and that is not the reason.
 	if _, has := obj["layers"]; has {
-		added, _ := layers.parse_layer_manifest(w.registry, string(src), allocator)
-		report.layers_added = added
+		lrep, _ := layers.parse_layer_manifest(w.registry, string(src), allocator)
+		report.layers_added = lrep.added
+		report.layers = lrep
 	}
 
 	entries, has_sources := obj["sources"]
@@ -283,14 +290,14 @@ crs_from_json :: proc(obj: json.Object) -> (crs: Maybe(geo.Projection), epsg: in
 named_option :: proc(
 	obj: json.Object,
 	key, default: string,
-	table: []Named($E),
+	table: []layers.Named($E),
 ) -> (
 	value: E,
 	name: string,
 	ok: bool,
 ) {
 	name = layers.json_string(obj, key, default)
-	value, ok = enum_from_name(name, table)
+	value, ok = layers.lookup_name(name, table)
 	return
 }
 

@@ -11,17 +11,6 @@ to cover the real world: elevation as i16 quarter-metres is 2 bytes a cell,
 resolves to 25 cm, and still spans -8191 to 8191 m.
 */
 
-NAN :: f64(0h7ff8_0000_0000_0000)
-
-// Sentinels. Integer layers give up their top code to mean "no data"; float
-// layers use NaN.
-NODATA_U8 :: 255.0
-NODATA_I8 :: -128.0
-NODATA_U16 :: 65535.0
-NODATA_I16 :: -32768.0
-NODATA_U32 :: 4294967295.0
-NODATA_I32 :: -2147483648.0
-
 // Registers a layer whose values span orders of magnitude.
 @(private)
 register_log :: proc(r: ^Registry, desc: Layer_Desc) -> (Layer_Id, bool) {
@@ -44,22 +33,7 @@ scalar_layer :: proc(
 ) -> Layer_Desc {
 	nd := nodata
 	if has_nodata && nodata == 0 {
-		switch kind {
-		case .U8:
-			nd = NODATA_U8
-		case .I8:
-			nd = NODATA_I8
-		case .U16:
-			nd = NODATA_U16
-		case .I16:
-			nd = NODATA_I16
-		case .U32:
-			nd = NODATA_U32
-		case .I32:
-			nd = NODATA_I32
-		case .F32, .F64:
-			nd = NAN
-		}
+		nd = default_nodata_raw(kind)
 	}
 	return Layer_Desc {
 		name = name,

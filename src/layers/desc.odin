@@ -24,18 +24,45 @@ Element_Kind :: enum u8 {
 	F64,
 }
 
+NAN :: f64(0h7ff8_0000_0000_0000)
+
+/*
+Everything that follows from an element type, in one row each.
+
+These four numbers are load-bearing together, not separately. `encode_storable`
+narrows the storable range by one on the assumption that `nodata` sits at `lo`
+or `hi`; if the two ever disagreed, real values at the end of the range would
+silently start reading as "no data". Keeping them in one row is what makes that
+invariant checkable -- see `element_test.odin`, which asserts it.
+
+Integer layers give up their top (or bottom) code to mean "no data"; float
+layers use NaN, which costs no range at all.
+*/
+Element_Traits :: struct {
+	size:   int,
+	lo, hi: f64,
+	nodata: f64,
+}
+
+ELEMENT_TRAITS := [Element_Kind]Element_Traits {
+	.U8  = {1, 0, 255, 255},
+	.I8  = {1, -128, 127, -128},
+	.U16 = {2, 0, 65535, 65535},
+	.I16 = {2, -32768, 32767, -32768},
+	.U32 = {4, 0, 4294967295, 4294967295},
+	.I32 = {4, -2147483648, 2147483647, -2147483648},
+	.F32 = {4, min(f64), max(f64), NAN},
+	.F64 = {8, min(f64), max(f64), NAN},
+}
+
 element_size :: proc "contextless" (k: Element_Kind) -> int {
-	switch k {
-	case .U8, .I8:
-		return 1
-	case .U16, .I16:
-		return 2
-	case .U32, .I32, .F32:
-		return 4
-	case .F64:
-		return 8
-	}
-	return 0
+	return ELEMENT_TRAITS[k].size
+}
+
+// The code this element type reserves for "no data", for a layer that does not
+// name its own.
+default_nodata_raw :: proc "contextless" (k: Element_Kind) -> f64 {
+	return ELEMENT_TRAITS[k].nodata
 }
 
 // What the numbers mean. This drives aggregation defaults, interpolation
@@ -171,23 +198,8 @@ is_nodata_raw :: #force_inline proc "contextless" (d: ^Layer_Desc, raw: f64) -> 
 // Lowest and highest raw values the layer's element type can hold. Float types
 // are unbounded.
 raw_range :: proc "contextless" (k: Element_Kind) -> (lo, hi: f64) {
-	switch k {
-	case .U8:
-		return 0, 255
-	case .I8:
-		return -128, 127
-	case .U16:
-		return 0, 65535
-	case .I16:
-		return -32768, 32767
-	case .U32:
-		return 0, 4294967295
-	case .I32:
-		return -2147483648, 2147483647
-	case .F32, .F64:
-		return min(f64), max(f64)
-	}
-	return 0, 0
+	t := ELEMENT_TRAITS[k]
+	return t.lo, t.hi
 }
 
 // Encodes a value to its raw form, clamped to a value the layer can store and

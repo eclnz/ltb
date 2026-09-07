@@ -96,17 +96,8 @@ value_range :: proc(r: ^Renderer, w: ^world.World, layer: layers.Layer_Id, level
 	d := layers.desc_of(w.registry, layer)
 	out := Value_Range{d.min_value, d.max_value}
 
-	cells := layers.collect_cells(w.store, layer, u8(level), context.temp_allocator)
-	defer delete(cells, context.temp_allocator)
-	if len(cells) > 0 {
-		lo, hi := cells[0].value, cells[0].value
-		for c in cells[1:] {
-			lo = math.min(lo, c.value)
-			hi = math.max(hi, c.value)
-		}
-		if hi > lo {
-			out = Value_Range{lo, hi}
-		}
+	if stats, has := layers.value_stats(w.store, layer, u8(level)); has && stats.hi > stats.lo {
+		out = Value_Range{stats.lo, stats.hi}
 	}
 	r.ranges[key] = out
 	return out

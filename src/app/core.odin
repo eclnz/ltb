@@ -32,12 +32,14 @@ startup :: proc(app: ^App, opts: Options) -> (ok: bool) {
 	layers.registry_init(&app.registry)
 	layers.register_standard_layers(&app.registry)
 	if len(opts.layer_file) > 0 {
-		added, lerr := layers.load_layer_manifest(&app.registry, opts.layer_file)
+		report, lerr := layers.load_layer_manifest(&app.registry, opts.layer_file)
 		if lerr != .None {
 			fmt.eprintfln("could not read %s: %v", opts.layer_file, lerr)
 			return false
 		}
-		fmt.printfln("registered %d extra layers from %s", added, opts.layer_file)
+		defer layers.layer_manifest_report_destroy(&report)
+		fmt.printfln("registered %d extra layers from %s", report.added, opts.layer_file)
+		report_layer_problems(&report, opts.layer_file)
 	}
 	layers.store_init(&app.store, &app.registry)
 	app.opts = opts
@@ -124,6 +126,22 @@ run_ticks :: proc(s: ^sim.Sim, n: int) {
 		if sys.runs > 0 {
 			fmt.printfln("  %-16s %6d runs, %8d cells last pass", sys.name, sys.runs, sys.cells_touched)
 		}
+	}
+}
+
+// Declarations a layer manifest could not use. Nothing here stops the world
+// being built, but a layer that quietly failed to register is a layer whose
+// sources will all fail later for a reason that looks unrelated.
+report_layer_problems :: proc(rep: ^layers.Layer_Manifest_Report, path: string) {
+	for p in rep.skipped {
+		if len(p.name) > 0 {
+			fmt.eprintfln("  %s: skipped %q -- %s", path, p.name, p.reason)
+		} else {
+			fmt.eprintfln("  %s: skipped a declaration -- %s", path, p.reason)
+		}
+	}
+	for name in rep.redefined {
+		fmt.eprintfln("  %s: %q is already registered; the existing layer was kept", path, name)
 	}
 }
 
@@ -334,14 +352,14 @@ report_world :: proc(w: ^world.World, opts: Options) {
 }
 
 report_store :: proc(s: ^layers.Store, r: ^layers.Registry) {
+	// One pass over the store rather than one per layer per level.
+	counts := make([]int, layers.layer_count(r), context.temp_allocator)
+	defer delete(counts, context.temp_allocator)
+	layers.chunk_counts(s, counts)
+
 	total_chunks := 0
 	populated := 0
-	for i in 0 ..< layers.layer_count(r) {
-		id := layers.Layer_Id(i)
-		n := 0
-		for l in 0 ..< 16 {
-			n += layers.count_chunks(s, id, u8(l))
-		}
+	for n in counts {
 		if n > 0 {
 			populated += 1
 			total_chunks += n
@@ -353,6 +371,14 @@ report_store :: proc(s: ^layers.Store, r: ^layers.Registry) {
 		total_chunks,
 		f64(s.bytes_resident) / (1024.0 * 1024.0),
 	)
+	// Values that did not fit their layer's element type. Silent clipping is how
+	// an i16 elevation layer ends up with a flat summit nobody questions.
+	if s.saturated > 0 {
+		fmt.eprintfln(
+			"store: %d writes were pinned to the end of their layer's range; check its type, scale and min/max",
+			s.saturated,
+		)
+	}
 }
 
 // Prints a value range per populated layer, which is the quickest way to see
@@ -362,24 +388,17 @@ report_layers :: proc(w: ^world.World) {
 	for i in 0 ..< layers.layer_count(w.registry) {
 		id := layers.Layer_Id(i)
 		d := layers.desc_of(w.registry, id)
-		cells := layers.collect_cells(w.store, id, 0, context.temp_allocator)
-		defer delete(cells, context.temp_allocator)
-		if len(cells) == 0 {
+		stats, has_data := layers.value_stats(w.store, id, 0)
+		if !has_data {
 			continue
-		}
-		lo, hi, sum := cells[0].value, cells[0].value, 0.0
-		for c in cells {
-			lo = min(lo, c.value)
-			hi = max(hi, c.value)
-			sum += c.value
 		}
 		fmt.printfln(
 			"  %-36s %9d cells  min %10.3f  mean %10.3f  max %10.3f  %s",
 			d.name,
-			len(cells),
-			lo,
-			sum / f64(len(cells)),
-			hi,
+			stats.count,
+			stats.lo,
+			layers.value_mean(stats),
+			stats.hi,
 			d.unit,
 		)
 		free_all(context.temp_allocator)
