@@ -141,10 +141,10 @@ load_manifest :: proc(
 	// the same source, and these files run to tens of megabytes.
 	cache := make(map[string]^Feature_Collection, 8, context.allocator)
 	defer {
-		for path, fc in cache {
+		for cached_path, fc in cache {
 			features_destroy(fc)
 			free(fc, context.allocator)
-			delete(path, context.allocator)
+			delete(cached_path, context.allocator)
 		}
 		delete(cache)
 	}

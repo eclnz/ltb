@@ -4,7 +4,6 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 import geo "ltb:geo"
-import "ltb:layers"
 
 /*
 ESRI ASCII grid (.asc / .grd).

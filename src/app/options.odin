@@ -3,7 +3,6 @@ package app
 import "core:fmt"
 import "core:os"
 import "core:strconv"
-import "core:strings"
 
 /*
 Fields a manifest's "region" block can also set.

@@ -9,8 +9,6 @@ package app
 
 import "core:fmt"
 import "core:math"
-import "core:os"
-import "core:strings"
 import "core:time"
 import geo "ltb:geo"
 import "ltb:ingest"

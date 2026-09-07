@@ -133,8 +133,6 @@ draw_layer :: proc(r: ^Renderer, w: ^world.World, cam: ^Camera, view: View) -> (
 		vr := value_range(r, w, view.layer, level)
 		stats.range_lo, stats.range_hi = vr.lo, vr.hi
 	}
-	span := stats.range_hi - stats.range_lo
-
 	nc := layers.desc_components(desc)
 	comps: [layers.MAX_ACCUM_COMPONENTS]f64
 

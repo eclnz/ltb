@@ -11,7 +11,6 @@ collection is a linear scan.
 */
 package ingest
 
-import "core:math"
 import "core:mem"
 import "core:strings"
 import geo "ltb:geo"

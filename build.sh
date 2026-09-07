@@ -2,9 +2,9 @@
 # Build and test the ltb commands.
 #
 #   ./build.sh                headless CLI + windowed viewer, optimised
-#   ./build.sh debug          both, with debug info and bounds checks
+#   ./build.sh debug          both, with debug info, bounds checks and ASan
 #   ./build.sh headless       just the CLI (links no graphics libraries)
-#   ./build.sh check          type-check every package without linking
+#   ./build.sh check          type-check and vet every package without linking
 #   ./build.sh test           run every package's tests
 #   ./build.sh test hex geo   run just these packages' tests
 #
@@ -23,13 +23,32 @@ mkdir -p "$OUT"
 # caused it rather than in whatever imported it.
 PACKAGES="hex geo ecs layers world ingest/tiff ingest sim ui render app"
 
+# Static checks. Kept in one place so `check` and `test` cannot drift apart from
+# each other on what counts as acceptable code.
+#
+#   -vet-unused        bindings and imports nothing reads
+#   -vet-shadowing     an inner declaration hiding an outer one
+#   -vet-using-stmt    `using` at statement level, which makes scope unreadable
+#   -vet-semicolon     stray terminators
+#   -vet-cast          casts that do nothing
+#   -strict-style      the compiler's own formatting and import-ordering rules
+#
+# Deliberately not -vet-style: it rejects the aligned struct field blocks and
+# tabular @(rodata) tables this codebase uses on purpose.
+VET="-vet-unused -vet-shadowing -vet-using-stmt -vet-semicolon -vet-cast -strict-style"
+
+# Address and undefined-behaviour sanitizers, on the debug build only. The
+# layers package hands out raw slices into mmap'd chunk storage, so an
+# out-of-bounds write there is otherwise silent until the data looks wrong.
+SANITIZE="-sanitize:address"
+
 mode=${1:-release}
 case "$mode" in
   release)  FLAGS="-o:speed" ;;
-  debug)    FLAGS="-debug -o:none" ;;
+  debug)    FLAGS="-debug -o:none $SANITIZE $VET" ;;
   headless) FLAGS="-o:speed" ;;
-  test)     FLAGS="" ;;
-  check)    FLAGS="" ;;
+  test)     FLAGS="$VET" ;;
+  check)    FLAGS="$VET" ;;
   *) echo "usage: $0 [release|debug|headless|check|test [package...]]" >&2; exit 2 ;;
 esac
 
@@ -64,7 +83,7 @@ case "$mode" in
         continue
       fi
       echo "---- $pkg"
-      if ! $ODIN test "$dir" $COLLECTION -out:"$OUT/test-${pkg//\//-}"; then
+      if ! $ODIN test "$dir" $COLLECTION $FLAGS -out:"$OUT/test-${pkg//\//-}"; then
         failed=$((failed + 1))
       fi
     done
@@ -73,7 +92,7 @@ case "$mode" in
   check)
     for pkg in $PACKAGES; do
       echo "checking src/$pkg"
-      $ODIN check "src/$pkg" $COLLECTION -no-entry-point
+      $ODIN check "src/$pkg" $COLLECTION $FLAGS -no-entry-point
     done
     ;;
   headless)
