@@ -10,6 +10,7 @@ stored (element type, component count, linear scale/offset), what they mean
 */
 package layers
 
+import "base:intrinsics"
 import "core:math"
 
 // How a single component is stored in a chunk buffer.
@@ -63,6 +64,57 @@ element_size :: proc "contextless" (k: Element_Kind) -> int {
 // name its own.
 default_nodata_raw :: proc "contextless" (k: Element_Kind) -> f64 {
 	return ELEMENT_TRAITS[k].nodata
+}
+
+// Reads one stored element as a f64. Public because ingest needs to decode
+// source rasters that use the same element vocabulary.
+read_element :: proc "contextless" (kind: Element_Kind, p: rawptr) -> f64 {
+	switch kind {
+	case .U8:
+		return f64(intrinsics.unaligned_load((^u8)(p)))
+	case .I8:
+		return f64(intrinsics.unaligned_load((^i8)(p)))
+	case .U16:
+		return f64(intrinsics.unaligned_load((^u16)(p)))
+	case .I16:
+		return f64(intrinsics.unaligned_load((^i16)(p)))
+	case .U32:
+		return f64(intrinsics.unaligned_load((^u32)(p)))
+	case .I32:
+		return f64(intrinsics.unaligned_load((^i32)(p)))
+	case .F32:
+		return f64(intrinsics.unaligned_load((^f32)(p)))
+	case .F64:
+		return intrinsics.unaligned_load((^f64)(p))
+	}
+	return 0
+}
+
+// Writes one element, clamping to the destination type's range.
+//
+// The bounds come from `ELEMENT_TRAITS`, so this cannot disagree with
+// `encode_storable` about what an element type can hold.
+write_element :: proc "contextless" (kind: Element_Kind, p: rawptr, v: f64) {
+	t := ELEMENT_TRAITS[kind]
+	c := clamp(v, t.lo, t.hi)
+	switch kind {
+	case .U8:
+		intrinsics.unaligned_store((^u8)(p), u8(c))
+	case .I8:
+		intrinsics.unaligned_store((^i8)(p), i8(c))
+	case .U16:
+		intrinsics.unaligned_store((^u16)(p), u16(c))
+	case .I16:
+		intrinsics.unaligned_store((^i16)(p), i16(c))
+	case .U32:
+		intrinsics.unaligned_store((^u32)(p), u32(c))
+	case .I32:
+		intrinsics.unaligned_store((^i32)(p), i32(c))
+	case .F32:
+		intrinsics.unaligned_store((^f32)(p), f32(v))
+	case .F64:
+		intrinsics.unaligned_store((^f64)(p), v)
+	}
 }
 
 // What the numbers mean. This drives aggregation defaults, interpolation
