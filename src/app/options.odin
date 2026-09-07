@@ -43,10 +43,6 @@ Options :: struct {
 	manifest:     string,
 	// Extra layer declarations to register before anything else.
 	layer_file:   string,
-	// Render a scripted set of frames to this directory and exit.
-	shots_dir:    string,
-	// Which scripted set to render: "wide" or "close".
-	shots_set:    string,
 	// Layer the viewer opens on. Empty falls back to terrain.elevation, then
 	// to the first layer that holds anything.
 	open_layer:   string,
@@ -95,8 +91,6 @@ usage: ltb [options]
                         opening layer unless the flags above are given
   --layers PATH         register extra layer declarations from a JSON file
   --open-layer NAME     layer the viewer opens on
-  --shots DIR           render a scripted set of frames to DIR and exit
-  --shot-set NAME       which set: wide (default) or close
   --width N --height N  window size
   --list-layers         print the layer catalogue and exit
   --help                this message
@@ -199,10 +193,6 @@ parse_options :: proc() -> (o: Options, ok: bool) {
 		case "--open-layer":
 			o.open_layer = next_value(args, &i, a) or_return
 			o.given += {.Open_Layer}
-		case "--shots":
-			o.shots_dir = next_value(args, &i, a) or_return
-		case "--shot-set":
-			o.shots_set = next_value(args, &i, a) or_return
 		case "--width":
 			v := next_value(args, &i, a) or_return
 			o.width = integer(v, a) or_return

@@ -262,7 +262,7 @@ draw_inspector :: proc(a: ^app.App, level: int, h: hex.Hex, max_rows := 30) {
 }
 
 // ---------------------------------------------------------------------------
-// Full-window messages
+// Full-window message
 // ---------------------------------------------------------------------------
 
 // Why there is no map, in the middle of the window where the map would be. The
@@ -278,14 +278,4 @@ draw_no_map :: proc(reason: string) {
 		ui.BODY,
 		ui.TEXT_MUTED,
 	)
-}
-
-// A caption under a scripted screenshot.
-@(private)
-draw_caption :: proc(text: string) {
-	p := ui.panel_begin(.Bottom_Center, {0, 64})
-	p.pad = {14, 7}
-	p.bg = ui.Color{0, 0, 0, 170}
-	defer ui.panel_end(&p)
-	ui.heading(&p, text)
 }
